@@ -1,0 +1,21 @@
+{
+  "name": "aws-s3-zipper",
+  "version": "0.0.1",
+  "description": "Zips an Amazon S3 directory as a stream or file. Allows filtering files",
+  "main": "index.js",
+  "dependencies": {
+    "adm-zip":"0.4.*",
+    "aws-sdk": "2.0.*",
+    "async" :"1.5.*"
+  },
+  "repository": "https://github.com/DanielHindi/aws-s3-zipper.git",
+  "keywords": [
+    "zip",
+    "amazon",
+    "aws",
+    "s3"
+  ],
+  "author": "Daniel Hindi",
+  "license": "MIT",
+  "readmeFilename": "README.md"
+}
