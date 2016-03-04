@@ -1,15 +1,16 @@
 var assert = require('assert');
-var Stream = require('stream');
-//var archiver = require('archiver');
-var AdmZip = require('adm-zip');
-
+var archiver = require('archiver');
 var async = require('async');
 var AWS = require('aws-sdk');
+var fs = require('fs');
+
+
+
 
 function S3Zipper(awsConfig) {
     assert.ok(awsConfig, 'AWS S3 options must be defined.');
     assert.notEqual(awsConfig.accessKeyId, undefined, 'Requires S3 AWS Key.');
-    assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requres S3 AWS Secret');
+    assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requires S3 AWS Secret');
     assert.notEqual(awsConfig.region, undefined, 'Requires AWS S3 region.');
     assert.notEqual(awsConfig.bucket, undefined, 'Requires AWS S3 bucket.');
     this.init(awsConfig);
@@ -58,7 +59,7 @@ S3Zipper.prototype = {
             }
         });
     }
-    ,createZipObject: function (folderName,startKey, callback) {
+    ,streamZipDataTo: function (pipe,folderName, startKey, callback) {
         if (!folderName) {
             console.error('folderName required');
             return null;
@@ -69,8 +70,8 @@ S3Zipper.prototype = {
             startKey=null;
         }
 
-        //var archive = archiver('zip');
-        var zip = new AdmZip();
+        var zip = new archiver.create('zip');
+        if(pipe) zip.pipe(pipe);
 
         var t= this;
 
@@ -87,41 +88,78 @@ S3Zipper.prototype = {
                             name.shift();
                             name = name.join("/");
                             console.log('zipping ', name,'...');
-                            zip.addFile(name ,new Buffer(data.Body));
+
+                            zip.append(data.Body, {name:name});
                             callback(null, f);
+
                         }
 
                     });
 
                 }, function(err,results){
+                    zip.finalize();
                     zip.manifest = results;
                     callback(err,zip);
+
                 });
             }
         });
 
     }
-    ,zipToS3File: function (folderName,startKey,s3ZipFileName ,callback){
-        var t= this;
+    //all these timeouts are because streams arent done writing when they say they are
+    ,zipToS3File: function (s3FolderName,startKey,s3ZipFileName ,callback){
+        var t = this;
+        var tempFile = '__' + Date.now() + '.zip';
 
-        if(s3ZipFileName.indexOf("/") < 0)
-            s3ZipFileName = folderName + "/" + s3ZipFileName;
+        if(s3ZipFileName.indexOf('/') < 0 )
+            s3ZipFileName=s3FolderName + "/" + s3ZipFileName;
 
-        this.createZipObject(folderName,startKey,function(err,zip){
+
+        this.zipToFile(s3FolderName,startKey,tempFile ,function(err,r){
             console.log('uploading ',s3ZipFileName,'...');
-            t.s3bucket.putObject({Bucket: t.awsConfig.Bucket,Key :s3ZipFileName, Body :zip.toBuffer()},function(err,result){
-                if(err)
-                    callback(err);
-                else {
-                    console.log('zip upload completed.');
-                    return {
-                        zipFileETag: result.ETag,
-                        zippedFiles: zip.manifest
-                    };
-                }
-            } );
-        })
+
+            var readStream = fs.createReadStream(tempFile);//tempFile
+
+            t.s3bucket.upload({
+                    Bucket: t.awsConfig.bucket
+                    ,Key :s3ZipFileName
+                    ,ContentType:"application/zip"
+                    ,Body:readStream
+                })
+                .on('httpUploadProgress', function(e) {
+                    console.log('upload progress', Math.round(e.loaded/ e.total * 100,0) ,'%' );
+
+                })
+                .send(function(err, result) {
+                    readStream.close();
+                    if(err)
+                        callback(err);
+                    else {
+                        console.log('zip upload completed.');
+
+                        callback(null, {
+                            zipFileETag: result.ETag,
+                            zipFileLocation: result.Location,
+                            zippedFiles: r.manifest
+                        });
+                        fs.unlink(tempFile);
+                    }
+                });
+
+        });
+
+
     }
+    ,zipToFile: function (s3FolderName,startKey,zipFileName ,callback){
+        var fileStream = fs.createWriteStream(zipFileName);
+        this.streamZipDataTo(fileStream,s3FolderName,startKey,function(err,result){
+            setTimeout(function(){
+                callback(err,result);
+                fileStream.close();
+            },1000);
+        });
+    }
+
 };
 
 module.exports = S3Zipper;
