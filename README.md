@@ -1,6 +1,6 @@
 # Amazon S3 Zipping tool (aws-s3-zipper)
 
-## What do it do?
+## What does it do?
 ###1. Zips S3 files
 Takes an amazon s3 bucket folder and zips it to a:
 * Stream
