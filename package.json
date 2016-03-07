@@ -1,6 +1,6 @@
 {
   "name": "aws-s3-zipper",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Zips an Amazon S3 directory as a stream or file. Allows filtering files",
   "main": "index.js",
   "dependencies": {

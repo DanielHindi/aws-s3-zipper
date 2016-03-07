@@ -118,34 +118,44 @@ S3Zipper.prototype = {
         this.zipToFile(s3FolderName,startKey,tempFile ,function(err,r){
             console.log('uploading ',s3ZipFileName,'...');
 
-            var readStream = fs.createReadStream(tempFile);//tempFile
+            if(r && r.manifest && r.manifest.length) {
+                var readStream = fs.createReadStream(tempFile);//tempFile
 
-            t.s3bucket.upload({
-                    Bucket: t.awsConfig.bucket
-                    ,Key :s3ZipFileName
-                    ,ContentType:"application/zip"
-                    ,Body:readStream
-                })
-                .on('httpUploadProgress', function(e) {
-                    console.log('upload progress', Math.round(e.loaded/ e.total * 100,0) ,'%' );
+                t.s3bucket.upload({
+                        Bucket: t.awsConfig.bucket
+                        , Key: s3ZipFileName
+                        , ContentType: "application/zip"
+                        , Body: readStream
+                    })
+                    .on('httpUploadProgress', function (e) {
+                        console.log('upload progress', Math.round(e.loaded / e.total * 100, 0), '%');
 
-                })
-                .send(function(err, result) {
-                    readStream.close();
-                    if(err)
-                        callback(err);
-                    else {
-                        console.log('zip upload completed.');
+                    })
+                    .send(function (err, result) {
+                        readStream.close();
+                        if (err)
+                            callback(err);
+                        else {
+                            console.log('zip upload completed.');
 
-                        callback(null, {
-                            zipFileETag: result.ETag,
-                            zipFileLocation: result.Location,
-                            zippedFiles: r.manifest
-                        });
-                        fs.unlink(tempFile);
-                    }
+                            callback(null, {
+                                zipFileETag: result.ETag,
+                                zipFileLocation: result.Location,
+                                zippedFiles: r.manifest
+                            });
+                            fs.unlink(tempFile);
+                        }
+                    });
+            }
+            else {
+                console.log('no files zipped. nothing to upload');
+                fs.unlink(tempFile);
+                callback(null, {
+                    zipFileETag: null,
+                    zipFileLocation: null,
+                    zippedFiles: []
                 });
-
+            }
         });
 
 
