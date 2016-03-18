@@ -159,11 +159,31 @@ Zip files in an s3 folder and place the zip file back on s3
   * `err`: the error object if any
   * `result`: the resulting archiver zip object with attached property 'manifest' whcih is an array of files it zipped
 
+### `zipToS3FileFragments: function (s3FolderName, startKey, s3ZipFileName, maxFileCount, maxFileSize , callback)`
+* `s3FolderName`: the name of the bucket folder you want to stream
+* `startKey`: optional. start zipping after this file key
+* `s3ZipFileName`: the pattern of the name of the S3 zip files to be uploaded. Fragments will have an underscore and index at the end of the file name example ["allImages_1.zip","allImages_2.zip","allImages_3.zip"]
+* `maxFileCount`: Optional. maximum number of files to zip in a single fragment.
+* `maxFileSize`: Optional. Maximum Bytes to fit into a single zip fragment. Note: If a file is found larger than the limit a separate fragment will becreated just for it.
+* `callback(err,result)`: call this function when done
+  * `err`: the error object if any
+  * `results`: the array of results
+
 ### `zipToFile: function (s3FolderName,startKey,zipFileName ,callback)`
 Zip files to a local zip file. 
 * `s3FolderName`: the name of the bucket folder you want to stream
 * `startKey`: optional. start zipping after this file key
-* `filerName`: the name of the new local zip file including its path.
+* `zipFileName`: the name of the new local zip file including its path.
 * `callback(err,result)`: call this function when done
   * `err`: the error object if any
   * `result`: the resulting archiver zip object with attached property 'manifest' whcih is an array of files it zipped
+
+### `zipToFileFragments: function (s3FolderName,startKey,zipFileName ,maxFileCount,maxFileSize,callback)`
+* `s3FolderName`: the name of the bucket folder you want to stream
+* `startKey`: optional. start zipping after this file key
+* `zipFileName`: the pattern of the name of the zip files to be uploaded. Fragments will have an underscore and index at the end of the file name example ["allImages_1.zip","allImages_2.zip","allImages_3.zip"]
+* `maxFileCount`: Optional. maximum number of files to zip in a single fragment.
+* `maxFileSize`: Optional. Maximum Bytes to fit into a single zip fragment. Note: If a file is found larger than the limit a separate fragment will becreated just for it.
+* `callback(err,result)`: call this function when done
+  * `err`: the error object if any
+  * `results`: the array of results
