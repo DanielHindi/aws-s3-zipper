@@ -5,12 +5,17 @@
 Takes an amazon s3 bucket folder and zips it to a:
 * Stream
 * Local File
+* Local File Fragments (zip multiple files broken up by max number of files or size)
 * S3 File (ie uploads the zip back to s3)
+* S3 File Fragments (upload multiple zip files broken up by max number of files or size)
 
 ###2. Differential zipping
-It also allows you to do *differential* zips. Youc an save the key of the last file you zipped and then zip files that have been uploaded after the last zip.
+It also allows you to do *differential* zips. You can save the key of the last file you zipped and then zip files that have been uploaded after the last zip.
 
-###3. Filter Files to zip
+###3. Fragmented Zips
+If a zip file has the potential of getting too big. You can provide limits to breakup the compression into multiple zip files. You can limit based on file count or total size (pre zip)
+
+###4. Filter Files to zip
 You can filter out files you dont want zipped based on any criteria you need
 
 
@@ -53,6 +58,22 @@ zipper.zipToFile ("myBucketFolderName",'keyOfLastFileIZipped', './myLocalFile.zi
 ```
 
 
+### Zip fragments to local file system with the filename pattern with a maximum file count
+```
+zipper.zipToFileFragments ('myBucketFolderName','keyOfLastFileIZipped', './myLocalFile.zip',maxNumberOfFilesPerZip, maxSizeInBytesPreZip, function(err,results){
+    if(err)
+           console.error(err);
+       else{
+           if(results.length > 0) {
+               var result = results[results.length - 1];
+               var lastFile = result.zippedFiles[result.zippedFiles.length - 1];
+               if (lastFile)
+                   console.log('last key ', lastFile.Key); // next time start from here
+           }
+       }
+   });
+```
+
 
 ### Zip to S3 file
 ```
@@ -65,6 +86,21 @@ zipper.zipToS3File ("myBucketFolderName",'keyOfLastFileIZipped', 'myS3File.zip',
         if(lastFile)
             console.log('last key ', lastFile.Key); // next time start from here
     }
+});
+```
+
+### Zip fragments to S3
+```
+zipper.zipToS3FileFragments("11111111111111",'', 'test.zip',5,1024*1024,function(err, results){
+    if(err)
+        console.error(err);
+    else    if(results.length > 0) {
+        var result = results[results.length - 1];
+        var lastFile = result.zippedFiles[result.zippedFiles.length - 1];
+        if (lastFile)
+            console.log('last key ', lastFile.Key); // next time start from here
+    }
+
 });
 ```
 
@@ -97,11 +133,13 @@ Override this function when you want to filter out certain files. The `file` par
 
 ### `getFiles: function(folderName,startKey,callback)`
 Get a list of files in the bucket folder
-* `foldeName` : the name of the folder in the bucket
+* `folderName` : the name of the folder in the bucket
 * `startKey`: optional. return files listed after this file key
-* `callback(err,files)`: the function you want called when the list returns
+* `callback(err,result)`: the function you want called when the list returns
   * `err`: error object if it exists
-  * `files`: array of files found
+  * `result`:
+        * `files`: array of files found
+        * `totalFilesScanned`: total number of files scanned including filter out files from the `filterOutFiles` function
 
 ### `streamZipDataTo: function (pipe,folderName, startKey, callback)`
 If you want to get a stream to pipe raw data to. For example if you wanted to stream the zip file directly to an http response

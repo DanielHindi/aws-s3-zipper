@@ -1,7 +1,7 @@
 {
   "name": "aws-s3-zipper",
-  "version": "0.0.9",
-  "description": "Zip files from and to an Amazon AWS S3 Bucket directory as a stream or file. Allows filtering files",
+  "version": "0.1.0",
+  "description": "Zip files from and to an Amazon AWS S3 Bucket directory as a stream, file or fragments. Allows filtering files.",
   "main": "index.js",
   "dependencies": {
     "archiver":"0.21.*",
