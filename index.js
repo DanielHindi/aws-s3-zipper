@@ -160,7 +160,9 @@ S3Zipper.prototype = {
                 , Body: readStream
             })
             .on('httpUploadProgress', function (e) {
-                console.log('upload progress', Math.round(e.loaded / e.total * 100, 2), '%');
+                var p = Math.round(e.loaded / e.total * 1000) ;
+                if(p % 25 == 0)
+                    console.log('upload progress', p, '%');
 
             })
             .send(function (err, result) {
@@ -214,22 +216,35 @@ S3Zipper.prototype = {
         if(s3ZipFileName.indexOf('/') < 0 )
             s3ZipFileName=s3FolderName + "/" + s3ZipFileName;
 
+        var finalResult;
+
         var count = 0;
-        this.zipToFileFragments(s3FolderName,startKey,tempFile,maxFileCount,maxFileSize,callback)
-        .onFileZipped = function(fragFileName){
+        this.zipToFileFragments(s3FolderName,startKey,tempFile,maxFileCount,maxFileSize,function(err,result){
+            if(err)
+                callback(err);
+            else
+                finalResult=result;
+        })
+        .onFileZipped = function(fragFileName,result){
             var s3fn = s3ZipFileName.replace(".zip", "_" + count + ".zip" );
             count++;
-            uploadFrag(s3fn,fragFileName);
+            uploadFrag(s3fn,fragFileName,result);
         };
 
-        function uploadFrag(s3FragName,localFragName){
+        var pendingUploads = 0;// prevent race condition
+        function uploadFrag(s3FragName,localFragName,result){
+            pendingUploads++;
+            t.uploadLocalFileToS3(localFragName, s3FragName, function (err, uploadResult) {
 
-            t.uploadLocalFileToS3(localFragName, s3FragName, function (err, result) {
-                if(result){
+                if(uploadResult){
+                    result.uploadedFile = uploadResult;
                     console.log('remove temp file ',localFragName);
                     fs.unlink(localFragName);
                 }
-
+                pendingUploads--;
+                if(pendingUploads == 0 && finalResult){
+                    callback(null,finalResult);
+                }
             });
         }
 
