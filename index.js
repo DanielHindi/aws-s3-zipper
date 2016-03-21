@@ -160,8 +160,8 @@ S3Zipper.prototype = {
                 , Body: readStream
             })
             .on('httpUploadProgress', function (e) {
-                var p = Math.round(e.loaded / e.total * 1000) ;
-                if(p % 25 == 0)
+                var p = Math.round(e.loaded / e.total * 100) ;
+                if(p % 10 == 0)
                     console.log('upload progress', p, '%');
 
             })
