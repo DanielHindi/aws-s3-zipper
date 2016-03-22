@@ -222,8 +222,11 @@ S3Zipper.prototype = {
         this.zipToFileFragments(s3FolderName,startKey,tempFile,maxFileCount,maxFileSize,function(err,result){
             if(err)
                 callback(err);
-            else
+            else{
                 finalResult=result;
+                if(!result || result.length == 0)
+                    callback(null,result); /// dont need to wait for uploads
+            }
         })
         .onFileZipped = function(fragFileName,result){
             var s3fn = s3ZipFileName.replace(".zip", "_" + count + ".zip" );
