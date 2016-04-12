@@ -44,7 +44,6 @@ S3Zipper.prototype = {
 
         var bucketParams = {
             Bucket: this.awsConfig.bucket, /* required */
-            Marker : 'testtrans01/items',
             Delimiter: "/",
             Prefix: folderName + "/"
         };
