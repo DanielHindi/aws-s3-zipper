@@ -4,9 +4,6 @@ var async = require('async');
 var AWS = require('aws-sdk');
 var fs = require('fs');
 
-
-
-
 function S3Zipper(awsConfig) {
     assert.ok(awsConfig, 'AWS S3 options must be defined.');
     assert.notEqual(awsConfig.accessKeyId, undefined, 'Requires S3 AWS Key.');
@@ -15,6 +12,9 @@ function S3Zipper(awsConfig) {
     assert.notEqual(awsConfig.bucket, undefined, 'Requires AWS S3 bucket.');
     this.init(awsConfig);
 }
+
+
+
 S3Zipper.prototype = {
     init: function (awsConfig) {
         this.awsConfig = awsConfig;
@@ -33,6 +33,13 @@ S3Zipper.prototype = {
     ,filterOutFiles: function(fileObj){
         return fileObj;
     }
+    ,calculateFileName: function (f) {
+    var name = f.Key.split("/");
+    name.shift();
+    name = name.join("/");
+    return name;
+
+}
     ,getFiles: function(folderName,startKey,maxFileCount,maxFileSize,callback){
 
         var bucketParams = {
@@ -122,9 +129,8 @@ S3Zipper.prototype = {
                         if(err)
                             callback(err);
                         else {
-                            var name = f.Key.split("/");
-                            name.shift();
-                            name = name.join("/");
+
+                            var name = t.calculateFileName(f);
                             console.log('zipping ', name,'...');
 
                             zip.append(data.Body, {name:name});
