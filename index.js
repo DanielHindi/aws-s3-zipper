@@ -3,6 +3,7 @@ var archiver = require('archiver');
 var async = require('async');
 var AWS = require('aws-sdk');
 var fs = require('fs');
+var s3 = require('s3');
 
 function S3Zipper(awsConfig) {
     assert.ok(awsConfig, 'AWS S3 options must be defined.');
@@ -13,6 +14,10 @@ function S3Zipper(awsConfig) {
     this.init(awsConfig);
 }
 
+
+function listObjectInner() {
+
+}
 
 
 S3Zipper.prototype = {
@@ -30,124 +35,145 @@ S3Zipper.prototype = {
         });
 
     }
-    ,filterOutFiles: function(fileObj){
+    , filterOutFiles: function (fileObj) {
         return fileObj;
     }
-    ,calculateFileName: function (f) {
-    var name = f.Key.split("/");
-    name.shift();
-    name = name.join("/");
-    return name;
+    , calculateFileName: function (f) {
+        var name = f.Key.split("/");
+        name.shift();
+        name = name.join("/");
+        return name;
 
-}
-    ,getFiles: function(folderName,startKey,maxFileCount,maxFileSize,callback){
+    }
+    , getFiles: function (folderName, startKey, maxFileCount, maxFileSize, callback) {
 
         var bucketParams = {
             Bucket: this.awsConfig.bucket, /* required */
             Delimiter: "/",
             Prefix: folderName + "/"
         };
+
         if (startKey)
             bucketParams.Marker = startKey;
 
-        if(typeof(maxFileCount) == "function" && typeof(callback) == "undefined"){
-            callback=maxFileCount;
+        if (typeof(maxFileCount) == "function" && typeof(callback) == "undefined") {
+            callback = maxFileCount;
             maxFileCount = null;
         }
-        else if(maxFileCount > 0)
+        else if (maxFileCount > 0)
             bucketParams.MaxKeys = maxFileCount;
 
         var t = this;
-        this.s3bucket.listObjects(bucketParams, function (err, data) {
-            if (err) {
-                callback(err, null);
-            } else {
-                var result = [];
-                var totalSizeOfPassedFiles=0;
-                var lastScannedFile;
-                for (var i = 0; i < data.Contents.length; i++) {
+        //var params = { recursive : true, s3Params : bucketParams};
 
-                    var passedFile = t.filterOutFiles(data.Contents[i]);
+        var files ={};
+        files.Contents = [];
 
-                    if(passedFile) {
+        var options = {
+            s3Client: this.s3bucket,
+            // more options available. See API docs below.
+        };
+        var client = s3.createClient(options);
 
+        var realParams = {
+            s3Params: bucketParams,
+            recursive: true
+        }
 
-                        if(maxFileSize && maxFileSize < passedFile.Size) {
-                            console.warn('Single file size exceeds max allowed size', data.Contents[i].Size, '>', maxFileSize, passedFile);
-                            if(result.length == 0){
-                                console.warn('Will zip large file on its own', passedFile.Key);
-                                result.push(passedFile);
-                                totalSizeOfPassedFiles += passedFile.Size;
-                            }
-                            else
-                                break;
-                        }
-                        else if(maxFileSize && totalSizeOfPassedFiles + data.Contents[i].Size > maxFileSize) {
-                            console.log('Hit max size limit. Split fragment');
-                            break;
-                        }
-                        else {
+        var emitter = client.listObjects(realParams);
+        emitter.on('data', function (data) {
+            if(data && data.Contents) {
+                files.Contents = files.Contents.concat(data.Contents);
+            }
+        });
+
+        emitter.on('end', function () {
+            data = files;
+            console.log('end');
+            var result = [];
+            var totalSizeOfPassedFiles = 0;
+            var lastScannedFile;
+            for (var i = 0; i < data.Contents.length; i++) {
+
+                var passedFile = t.filterOutFiles(data.Contents[i]);
+                if (passedFile) {
+                    if (maxFileSize && maxFileSize < passedFile.Size) {
+                        console.warn('Single file size exceeds max allowed size', data.Contents[i].Size, '>', maxFileSize, passedFile);
+                        if (result.length == 0) {
+                            console.warn('Will zip large file on its own', passedFile.Key);
                             result.push(passedFile);
                             totalSizeOfPassedFiles += passedFile.Size;
                         }
+                        else
+                            break;
                     }
-
-                    lastScannedFile = data.Contents[i];
+                    else if (maxFileSize && totalSizeOfPassedFiles + data.Contents[i].Size > maxFileSize) {
+                        console.log('Hit max size limit. Split fragment');
+                        break;
+                    }
+                    else {
+                        result.push(passedFile);
+                        totalSizeOfPassedFiles += passedFile.Size;
+                    }
                 }
-                callback(null, {files:result,totalFilesScanned :data.Contents.length,lastScannedFile:lastScannedFile} );
+
+                lastScannedFile = data.Contents[i];
             }
+
+            callback(null, {files: result, totalFilesScanned: data.Contents.length, lastScannedFile: lastScannedFile});
         });
     }
-    ,streamZipDataTo: function (pipe,folderName, startKey,maxFileCount,maxFileSize, callback) {
+    , streamZipDataTo: function (pipe, folderName, startKey, maxFileCount, maxFileSize, callback) {
         if (!folderName) {
             console.error('folderName required');
             return null;
         }
 
 
-        if(typeof(startKey) == "function" && !callback ) {
+        if (typeof(startKey) == "function" && !callback) {
             callback = startKey;
-            startKey=null;
+            startKey = null;
             maxFileCount = null;
-        }else if(typeof(maxFileCount) == "function" && typeof(callback) == "undefined"){
-            callback=maxFileCount;
+        } else if (typeof(maxFileCount) == "function" && typeof(callback) == "undefined") {
+            callback = maxFileCount;
             maxFileCount = null;
         }
 
         var zip = new archiver.create('zip');
-        if(pipe) zip.pipe(pipe);
+        if (pipe) zip.pipe(pipe);
 
-        var t= this;
+        var t = this;
 
-        this.getFiles(folderName,startKey,maxFileCount,maxFileSize,function(err,clearedFiles){
-            if(err)
+        this.getFiles(folderName, startKey, maxFileCount, maxFileSize, function (err, clearedFiles) {
+            if (err)
                 console.error(err);
-            else{
+            else {
                 var files = clearedFiles.files;
-                async.map(files,function(f,callback){
-                    t.s3bucket.getObject({Bucket: t.awsConfig.bucket,Key: f.Key },function(err,data){
-                        if(err)
+                console.log("files", files);
+                async.map(files, function (f, callback) {
+                    t.s3bucket.getObject({Bucket: t.awsConfig.bucket, Key: f.Key}, function (err, data) {
+                        if (err)
                             callback(err);
                         else {
 
                             var name = t.calculateFileName(f);
-                            console.log('zipping ', name,'...');
+                            console.log('zipping ', name, '...');
 
-                            zip.append(data.Body, {name:name});
+                            zip.append(data.Body, {name: name});
                             callback(null, f);
 
                         }
 
                     });
 
-                }, function(err,results){
+                }, function (err, results) {
                     zip.finalize();
                     zip.manifest = results;
-                    callback(err,{
+                    callback(err, {
                         zip: zip,
                         zippedFiles: results,
-                        totalFilesScanned:clearedFiles.totalFilesScanned,
-                        lastScannedFile:clearedFiles.lastScannedFile
+                        totalFilesScanned: clearedFiles.totalFilesScanned,
+                        lastScannedFile: clearedFiles.lastScannedFile
                     });
 
                 });
@@ -155,8 +181,8 @@ S3Zipper.prototype = {
         });
 
     }
-    ,uploadLocalFileToS3: function(localFileName, s3ZipFileName,callback){
-        console.log('uploading ',s3ZipFileName,'...');
+    , uploadLocalFileToS3: function (localFileName, s3ZipFileName, callback) {
+        console.log('uploading ', s3ZipFileName, '...');
         var readStream = fs.createReadStream(localFileName);//tempFile
 
         this.s3bucket.upload({
@@ -166,8 +192,8 @@ S3Zipper.prototype = {
                 , Body: readStream
             })
             .on('httpUploadProgress', function (e) {
-                var p = Math.round(e.loaded / e.total * 100) ;
-                if(p % 10 == 0)
+                var p = Math.round(e.loaded / e.total * 100);
+                if (p % 10 == 0)
                     console.log('upload progress', p, '%');
 
             })
@@ -177,23 +203,23 @@ S3Zipper.prototype = {
                     callback(err);
                 else {
                     console.log('upload completed.');
-                   callback(null,result);
+                    callback(null, result);
                 }
             });
     }
     //all these timeouts are because streams arent done writing when they say they are
-    ,zipToS3File: function (s3FolderName,startKey,s3ZipFileName ,callback){
+    , zipToS3File: function (s3FolderName, startKey, s3ZipFileName, callback) {
         var t = this;
         var tempFile = '__' + Date.now() + '.zip';
 
-        if(s3ZipFileName.indexOf('/') < 0 )
-            s3ZipFileName=s3FolderName + "/" + s3ZipFileName;
+        if (s3ZipFileName.indexOf('/') < 0)
+            s3ZipFileName = s3FolderName + "/" + s3ZipFileName;
 
 
-        this.zipToFile(s3FolderName,startKey,tempFile ,function(err,r){
+        this.zipToFile(s3FolderName, startKey, tempFile, function (err, r) {
 
-            if(r && r.zippedFiles && r.zippedFiles.length) {
-                t.uploadLocalFileToS3(tempFile,s3ZipFileName,function(err,result){
+            if (r && r.zippedFiles && r.zippedFiles.length) {
+                t.uploadLocalFileToS3(tempFile, s3ZipFileName, function (err, result) {
                     callback(null, {
                         zipFileETag: result.ETag,
                         zipFileLocation: result.Location,
@@ -215,81 +241,82 @@ S3Zipper.prototype = {
 
 
     }
-    ,zipToS3FileFragments: function (s3FolderName, startKey, s3ZipFileName, maxFileCount, maxFileSize , callback){
+    , zipToS3FileFragments: function (s3FolderName, startKey, s3ZipFileName, maxFileCount, maxFileSize, callback) {
         var t = this;
         var tempFile = '__' + Date.now() + '.zip';
 
-        if(s3ZipFileName.indexOf('/') < 0 )
-            s3ZipFileName=s3FolderName + "/" + s3ZipFileName;
+        if (s3ZipFileName.indexOf('/') < 0)
+            s3ZipFileName = s3FolderName + "/" + s3ZipFileName;
 
         var finalResult;
 
         var count = 0;
-        this.zipToFileFragments(s3FolderName,startKey,tempFile,maxFileCount,maxFileSize,function(err,result){
-            if(err)
+        this.zipToFileFragments(s3FolderName, startKey, tempFile, maxFileCount, maxFileSize, function (err, result) {
+            if (err)
                 callback(err);
-            else{
-                finalResult=result;
-                if(!result || result.length == 0)
-                    callback(null,result); /// dont need to wait for uploads
+            else {
+                finalResult = result;
+                if (!result || result.length == 0)
+                    callback(null, result); /// dont need to wait for uploads
             }
         })
-        .onFileZipped = function(fragFileName,result){
-            var s3fn = s3ZipFileName.replace(".zip", "_" + count + ".zip" );
+            .onFileZipped = function (fragFileName, result) {
+            var s3fn = s3ZipFileName.replace(".zip", "_" + count + ".zip");
             count++;
-            uploadFrag(s3fn,fragFileName,result);
+            uploadFrag(s3fn, fragFileName, result);
         };
 
         var pendingUploads = 0;// prevent race condition
-        function uploadFrag(s3FragName,localFragName,result){
+        function uploadFrag(s3FragName, localFragName, result) {
             pendingUploads++;
             t.uploadLocalFileToS3(localFragName, s3FragName, function (err, uploadResult) {
 
-                if(uploadResult){
+                if (uploadResult) {
                     result.uploadedFile = uploadResult;
-                    console.log('remove temp file ',localFragName);
+                    console.log('remove temp file ', localFragName);
                     fs.unlink(localFragName);
                 }
                 pendingUploads--;
-                if(pendingUploads == 0 && finalResult){
-                    callback(null,finalResult);
+                if (pendingUploads == 0 && finalResult) {
+                    callback(null, finalResult);
                 }
             });
         }
 
 
     }
-    ,zipToFile: function (s3FolderName,startKey,zipFileName ,callback){
+    , zipToFile: function (s3FolderName, startKey, zipFileName, callback) {
         var fileStream = fs.createWriteStream(zipFileName);
-        this.streamZipDataTo(fileStream,s3FolderName,startKey,null,null,function(err,result){
-            setTimeout(function(){
-                callback(err,result);
+        this.streamZipDataTo(fileStream, s3FolderName, startKey, null, null, function (err, result) {
+            setTimeout(function () {
+                callback(err, result);
                 fileStream.close();
-            },1000);
+            }, 1000);
         });
     }
-    ,zipToFileFragments: function (s3FolderName,startKey,zipFileName ,maxFileCount,maxFileSize,callback){
+    , zipToFileFragments: function (s3FolderName, startKey, zipFileName, maxFileCount, maxFileSize, callback) {
 
 
         var events = {
-            onFileZipped:function(){}
+            onFileZipped: function () {
+            }
         };
 
-        var report ={
-            results:[]
-            ,errors:[]
-            ,lastKey:null
-        } ;
+        var report = {
+            results: []
+            , errors: []
+            , lastKey: null
+        };
 
-        if(maxFileSize && maxFileSize < 1024)
-            console.warn ('Max File Size is really low. This may cause no files to be zipped, maxFileSize set to ',maxFileSize);
+        if (maxFileSize && maxFileSize < 1024)
+            console.warn('Max File Size is really low. This may cause no files to be zipped, maxFileSize set to ', maxFileSize);
 
-        if(zipFileName.indexOf(".zip") < 0)
-            zipFileName+=".zip";
+        if (zipFileName.indexOf(".zip") < 0)
+            zipFileName += ".zip";
 
-        var t= this;
+        var t = this;
 
-        function garbageCollector(fileStream,result,fragFileName){
+        function garbageCollector(fileStream, result, fragFileName) {
 
             setTimeout(function () {
 
@@ -299,14 +326,15 @@ S3Zipper.prototype = {
                     fs.unlink(fragFileName);
 
                 else
-                    events.onFileZipped(fragFileName,result);
-            },1000); /// TODO: Zip needs a bit more time to finishing writing. I'm sure there is a better way
+                    events.onFileZipped(fragFileName, result);
+            }, 1000); /// TODO: Zip needs a bit more time to finishing writing. I'm sure there is a better way
         }
 
         var counter = 0;
-        function recursiveLoop(startKey,fragFileName ,callback) {
+
+        function recursiveLoop(startKey, fragFileName, callback) {
             var fileStream = fs.createWriteStream(fragFileName);
-            t.streamZipDataTo(fileStream, s3FolderName, startKey, maxFileCount,maxFileSize, function (err, result) {
+            t.streamZipDataTo(fileStream, s3FolderName, startKey, maxFileCount, maxFileSize, function (err, result) {
 
                 if (err)
                     report.errors.push(err);
@@ -318,26 +346,26 @@ S3Zipper.prototype = {
 
 
                     /// you may have not zipped anything but you scanned files and there may be more
-                    if(result.totalFilesScanned > 0)
+                    if (result.totalFilesScanned > 0)
                         recursiveLoop(result.lastScannedFile.Key, zipFileName.replace(".zip", "_" + counter + ".zip"), callback);
                     else ///you're done time to go home
                         callback(err, result);
 
                     counter++;
                     /// clean up your trash you filthy animal
-                    garbageCollector(fileStream,result,fragFileName);
+                    garbageCollector(fileStream, result, fragFileName);
 
                 }
 
             });
         }
 
-        recursiveLoop(startKey,zipFileName ,function(){
+        recursiveLoop(startKey, zipFileName, function () {
 
-                if (report.errors.length > 0)
-                    callback(report.errors, report.results);
-                else
-                    callback(null, report.results);
+            if (report.errors.length > 0)
+                callback(report.errors, report.results);
+            else
+                callback(null, report.results);
 
         });
 
