@@ -131,6 +131,12 @@ S3Zipper.prototype = {
                         else {
 
                             var name = t.calculateFileName(f);
+
+                            if (name === ""){
+                                callback(null, f);
+                                return;
+                            }
+
                             console.log('zipping ', name,'...');
 
                             zip.append(data.Body, {name:name});
