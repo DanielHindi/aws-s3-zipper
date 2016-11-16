@@ -46,31 +46,43 @@ zipper.filterOutFiles= function(file){
 
 ### Zip to local file
 ```
-zipper.zipToFile ("myBucketFolderName",'keyOfLastFileIZipped', './myLocalFile.zip',function(err,result){
-    if(err)
-        console.error(err);
-    else{
-        var lastFile = result.zippedFiles[result.zippedFiles.length-1];
-        if(lastFile)
-            console.log('last key ', lastFile.Key); // next time start from here
+zipper.zipToFile ({
+        s3FolderName: 'myBucketFolderName'
+        , startKey: 'keyOfLastFileIZipped' // could keep null
+        , zipFileName: './myLocalFile.zip'
+        , recursive: true
     }
+    ,function(err,result){
+        if(err)
+            console.error(err);
+        else{
+            var lastFile = result.zippedFiles[result.zippedFiles.length-1];
+            if(lastFile)
+                console.log('last key ', lastFile.Key); // next time start from here
+        }
 });
 ```
 
 
 ### Zip fragments to local file system with the filename pattern with a maximum file count
 ```
-zipper.zipToFileFragments ('myBucketFolderName','keyOfLastFileIZipped', './myLocalFile.zip',maxNumberOfFilesPerZip, maxSizeInBytesPreZip, function(err,results){
-    if(err)
-           console.error(err);
-       else{
-           if(results.length > 0) {
-               var result = results[results.length - 1];
-               var lastFile = result.zippedFiles[result.zippedFiles.length - 1];
-               if (lastFile)
-                   console.log('last key ', lastFile.Key); // next time start from here
+zipper.zipToFileFragments ({
+        s3FolderName:'myBucketFolderName'
+        ,startKey: null
+        ,zipFileName './myLocalFile.zip'
+        ,maxFileCount: 5
+        ,maxFileSize: 1024*1024
+    }, function(err,results){
+        if(err)
+               console.error(err);
+           else{
+               if(results.length > 0) {
+                   var result = results[results.length - 1];
+                   var lastFile = result.zippedFiles[result.zippedFiles.length - 1];
+                   if (lastFile)
+                       console.log('last key ', lastFile.Key); // next time start from here
+               }
            }
-       }
    });
 ```
 
@@ -78,20 +90,30 @@ zipper.zipToFileFragments ('myBucketFolderName','keyOfLastFileIZipped', './myLoc
 ### Zip to S3 file
 ```
 /// if no path is given to S3 zip file then it will be placed in the same folder
-zipper.zipToS3File ("myBucketFolderName",'keyOfLastFileIZipped', 'myS3File.zip',function(err,result){
-    if(err)
-        console.error(err);
-    else{
-        var lastFile = result.zippedFiles[result.zippedFiles.length-1];
-        if(lastFile)
-            console.log('last key ', lastFile.Key); // next time start from here
-    }
+zipper.zipToS3File ({
+        s3FolderName: 'myBucketFolderName'
+        , startKey: 'keyOfLastFileIZipped' // optional
+        , s3ZipFileName: 'myS3File.zip'
+    },function(err,result){
+        if(err)
+            console.error(err);
+        else{
+            var lastFile = result.zippedFiles[result.zippedFiles.length-1];
+            if(lastFile)
+                console.log('last key ', lastFile.Key); // next time start from here
+        }
 });
 ```
 
 ### Zip fragments to S3
 ```
-zipper.zipToS3FileFragments("11111111111111",'', 'test.zip',5,1024*1024,function(err, results){
+zipper.zipToS3FileFragments({
+    s3FolderName: 'myBucketFolderName'
+    , startKey: 'keyOfLastFileIZipped' // optional
+    , s3ZipFileName: 'myS3File.zip'
+    , maxFileCount: 5
+    , maxFileSize: 1024*1024
+    },function(err, results){
     if(err)
         console.error(err);
     else    if(results.length > 0) {
@@ -106,7 +128,7 @@ zipper.zipToS3FileFragments("11111111111111",'', 'test.zip',5,1024*1024,function
 
 ##The Details
 ### `init`
-Either from the construcor or from the `init(config)` function you can pass along the AWS config object
+Either from the constructor or from the `init(config)` function you can pass along the AWS config object
 ```
 {
     accessKeyId: [Your access id],
@@ -136,6 +158,7 @@ Get a list of files in the bucket folder
 * `params` object
     * `folderName` : the name of the folder in the bucket
     * `startKey`: optional. return files listed after this file key
+    * `recursive`: bool optional. to zip nested folders or not
 * `callback(err,result)`: the function you want called when the list returns
   * `err`: error object if it exists
   * `result`:
@@ -148,6 +171,7 @@ If you want to get a stream to pipe raw data to. For example if you wanted to st
     * `pipe`: the pipe to which you want the stream to feed
     * `folderName`: the name of the bucket folder you want to stream
     * `startKey`: optional. start zipping after this file key
+    * `recursive`: bool optional. to zip nested folders or not
 * `callback(err,result)`: call this function when done
   * `err`: the error object if any
   * `result`: the resulting archiver zip object with attached property 'manifest' whcih is an array of files it zipped
@@ -158,6 +182,7 @@ Zip files in an s3 folder and place the zip file back on s3
     * `s3FolderName`: the name of the bucket folder you want to stream
     * `startKey`: optional. start zipping after this file key
     * `s3FilerName`: the name of the new s3 zip file including its path. if no path is given it will defult to the same s3 folder
+    * `recursive`: bool optional. to zip nested folders or not
 * `callback(err,result)`: call this function when done
   * `err`: the error object if any
   * `result`: the resulting archiver zip object with attached property 'manifest' whcih is an array of files it zipped
@@ -169,6 +194,7 @@ Zip files in an s3 folder and place the zip file back on s3
     * `s3ZipFileName`: the pattern of the name of the S3 zip files to be uploaded. Fragments will have an underscore and index at the end of the file name example ["allImages_1.zip","allImages_2.zip","allImages_3.zip"]
     * `maxFileCount`: Optional. maximum number of files to zip in a single fragment.
     * `maxFileSize`: Optional. Maximum Bytes to fit into a single zip fragment. Note: If a file is found larger than the limit a separate fragment will becreated just for it.
+    * `recursive`: bool optional. to zip nested folders or not
 * `callback(err,result)`: call this function when done
   * `err`: the error object if any
   * `results`: the array of results
@@ -179,6 +205,7 @@ Zip files to a local zip file.
     * `s3FolderName`: the name of the bucket folder you want to stream
     * `startKey`: optional. start zipping after this file key
     * `zipFileName`: the name of the new local zip file including its path.
+    * `recursive`: bool optional. to zip nested folders or not
 * `callback(err,result)`: call this function when done
   * `err`: the error object if any
   * `result`: the resulting archiver zip object with attached property 'manifest' whcih is an array of files it zipped
@@ -190,6 +217,7 @@ Zip files to a local zip file.
     * `zipFileName`: the pattern of the name of the zip files to be uploaded. Fragments will have an underscore and index at the end of the file name example ["allImages_1.zip","allImages_2.zip","allImages_3.zip"]
     * `maxFileCount`: Optional. maximum number of files to zip in a single fragment.
     * `maxFileSize`: Optional. Maximum Bytes to fit into a single zip fragment. Note: If a file is found larger than the limit a separate fragment will becreated just for it.
+    * `recursive`: bool optional. to zip nested folders or not
 * `callback(err,result)`: call this function when done
   * `err`: the error object if any
   * `results`: the array of results
