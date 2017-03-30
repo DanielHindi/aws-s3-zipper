@@ -30,7 +30,7 @@ npm install --save aws-s3-zipper
 ```
 import S3Zipper from 'aws-s3-zipper';
 
-const config ={
+const config = {
     accessKeyId: "XXXX",
     secretAccessKey: "XXXX",
     region: "us-west-2",
