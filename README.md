@@ -1,7 +1,7 @@
 # Amazon S3 Zipping tool (aws-s3-zipper)
 
 ## What does it do?
-###1. Zips S3 files
+### 1. Zips S3 files
 Takes an amazon s3 bucket folder and zips it to a:
 * Stream
 * Local File
@@ -9,37 +9,42 @@ Takes an amazon s3 bucket folder and zips it to a:
 * S3 File (ie uploads the zip back to s3)
 * S3 File Fragments (upload multiple zip files broken up by max number of files or size)
 
-###2. Differential zipping
+### 2. Differential zipping
 It also allows you to do *differential* zips. You can save the key of the last file you zipped and then zip files that have been uploaded after the last zip.
 
-###3. Fragmented Zips
+### 3. Fragmented Zips
 If a zip file has the potential of getting too big. You can provide limits to breakup the compression into multiple zip files. You can limit based on file count or total size (pre zip)
 
-###4. Filter Files to zip
+### 4. Filter Files to zip
 You can filter out files you dont want zipped based on any criteria you need
 
 
+## How do i use it?
 
-##How do i use it?
+### Installation
+```bash
+npm install --save aws-s3-zipper
+```
+
 ### Setup
 ```
-var S3Zipper = require ('aws-s3-zipper');
+import S3Zipper from 'aws-s3-zipper';
 
-var config ={
+const config ={
     accessKeyId: "XXXX",
     secretAccessKey: "XXXX",
     region: "us-west-2",
     bucket: 'XXX'
 };
-var zipper = new S3Zipper(config);
+const zipper = new S3Zipper(config);
 ```
 
-###Filter out Files
+### Filter out Files
 ```
 zipper.filterOutFiles= function(file){
-    if(file.Key.indexOf('.tmp') >= 0) // filter out temp files
+    if (file.Key.indexOf('.tmp') >= 0) // filter out temp files
         return null;
-    else 
+    else
       return file;
 };
 ```
@@ -52,11 +57,11 @@ zipper.zipToFile ({
         , zipFileName: './myLocalFile.zip'
         , recursive: true
     }
-    ,function(err,result){
-        if(err)
+    , (err,result) => {
+        if (err)
             console.error(err);
-        else{
-            var lastFile = result.zippedFiles[result.zippedFiles.length-1];
+        else {
+            const lastFile = result.zippedFiles[result.zippedFiles.length-1];
             if(lastFile)
                 console.log('last key ', lastFile.Key); // next time start from here
         }
@@ -72,13 +77,13 @@ zipper.zipToFileFragments ({
         ,zipFileName './myLocalFile.zip'
         ,maxFileCount: 5
         ,maxFileSize: 1024*1024
-    }, function(err,results){
-        if(err)
+    }, (err,results) => {
+        if (err)
                console.error(err);
-           else{
-               if(results.length > 0) {
-                   var result = results[results.length - 1];
-                   var lastFile = result.zippedFiles[result.zippedFiles.length - 1];
+           else {
+               if (results.length > 0) {
+                   const result = results[results.length - 1];
+                   const lastFile = result.zippedFiles[result.zippedFiles.length - 1];
                    if (lastFile)
                        console.log('last key ', lastFile.Key); // next time start from here
                }
@@ -94,11 +99,11 @@ zipper.zipToS3File ({
         s3FolderName: 'myBucketFolderName'
         , startKey: 'keyOfLastFileIZipped' // optional
         , s3ZipFileName: 'myS3File.zip'
-    },function(err,result){
-        if(err)
+    }, (err,result) => {
+        if (err)
             console.error(err);
-        else{
-            var lastFile = result.zippedFiles[result.zippedFiles.length-1];
+        else {
+            const lastFile = result.zippedFiles[result.zippedFiles.length-1];
             if(lastFile)
                 console.log('last key ', lastFile.Key); // next time start from here
         }
@@ -113,12 +118,12 @@ zipper.zipToS3FileFragments({
     , s3ZipFileName: 'myS3File.zip'
     , maxFileCount: 5
     , maxFileSize: 1024*1024
-    },function(err, results){
-    if(err)
+    }, (err, results) => {
+    if (err)
         console.error(err);
-    else    if(results.length > 0) {
-        var result = results[results.length - 1];
-        var lastFile = result.zippedFiles[result.zippedFiles.length - 1];
+    else if (results.length > 0) {
+        const result = results[results.length - 1];
+        const lastFile = result.zippedFiles[result.zippedFiles.length - 1];
         if (lastFile)
             console.log('last key ', lastFile.Key); // next time start from here
     }
@@ -126,7 +131,7 @@ zipper.zipToS3FileFragments({
 });
 ```
 
-##The Details
+## The Details
 ### `init`
 Either from the constructor or from the `init(config)` function you can pass along the AWS config object
 ```
@@ -200,7 +205,7 @@ Zip files in an s3 folder and place the zip file back on s3
   * `results`: the array of results
 
 ### `zipToFile: function (params ,callback)`
-Zip files to a local zip file. 
+Zip files to a local zip file.
 * `params` object
     * `s3FolderName`: the name of the bucket folder you want to stream
     * `startKey`: optional. start zipping after this file key
