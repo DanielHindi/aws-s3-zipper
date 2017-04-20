@@ -7,7 +7,7 @@ var s3 = require('s3');
 
 function S3Zipper(awsConfig) {
     AWS.config.getCredentials(function (err) {
-      if (error) {
+      if (err) {
         assert.ok(awsConfig, 'AWS S3 options must be defined.');
         assert.notEqual(awsConfig.accessKeyId, undefined, 'Requires S3 AWS Key.');
         assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requires S3 AWS Secret');
