@@ -34,7 +34,7 @@ var config ={
 var zipper = new S3Zipper(config);
 ```
 
-###Filter out Files
+### Filter out files
 ```
 zipper.filterOutFiles= function(file){
     if(file.Key.indexOf('.tmp') >= 0) // filter out temp files
@@ -63,6 +63,25 @@ zipper.zipToFile ({
 });
 ```
 
+### Pipe zip data to stream (using Express.js)
+```
+app.all('/', function (request, response) {
+    response.set('content-type', 'application/zip') // optional
+    zipper.streamZipDataTo({
+        pipe: response
+        , folderName: 'myBucketFolderName'
+        , startKey: 'keyOfLastFileIZipped' // could keep null
+        , recursive, true
+        }
+        ,function (err, result) {
+            if(err)
+                console.error(err);
+            else{
+                console.log(result)
+            }
+        })
+})
+```
 
 ### Zip fragments to local file system with the filename pattern with a maximum file count
 ```
