@@ -1,7 +1,7 @@
 # Amazon S3 Zipping tool (aws-s3-zipper)
 
 ## What does it do?
-###1. Zips S3 files
+### 1. Zips S3 files
 Takes an amazon s3 bucket folder and zips it to a:
 * Stream
 * Local File
@@ -9,18 +9,18 @@ Takes an amazon s3 bucket folder and zips it to a:
 * S3 File (ie uploads the zip back to s3)
 * S3 File Fragments (upload multiple zip files broken up by max number of files or size)
 
-###2. Differential zipping
+### 2. Differential zipping
 It also allows you to do *differential* zips. You can save the key of the last file you zipped and then zip files that have been uploaded after the last zip.
 
-###3. Fragmented Zips
+### 3. Fragmented Zips
 If a zip file has the potential of getting too big. You can provide limits to breakup the compression into multiple zip files. You can limit based on file count or total size (pre zip)
 
-###4. Filter Files to zip
+### 4. Filter Files to zip
 You can filter out files you dont want zipped based on any criteria you need
 
 
 
-##How do i use it?
+## How do i use it?
 ### Setup
 ```
 var S3Zipper = require ('aws-s3-zipper');
@@ -34,7 +34,7 @@ var config ={
 var zipper = new S3Zipper(config);
 ```
 
-###Filter out Files
+### Filter out Files
 ```
 zipper.filterOutFiles= function(file){
     if(file.Key.indexOf('.tmp') >= 0) // filter out temp files
@@ -126,7 +126,7 @@ zipper.zipToS3FileFragments({
 });
 ```
 
-##The Details
+## The Details
 ### `init`
 Either from the constructor or from the `init(config)` function you can pass along the AWS config object
 ```
