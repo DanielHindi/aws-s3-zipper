@@ -1,21 +1,15 @@
 {
-  "name": "aws-s3-zipper",
+  "name": "w-s3-zipper",
   "version": "1.0.1",
   "description": "Zip files from and to an Amazon AWS S3 Bucket directory as a stream, file or fragments. Allows filtering files.",
   "main": "index.js",
   "dependencies": {
-    "archiver":"0.21.*",
+    "archiver": "0.21.*",
     "aws-sdk": "2.2.*",
-    "async" :"1.5.*",
-    "s3" : "latest"
+    "async": "1.5.*",
+    "s3": "latest"
   },
   "repository": "https://github.com/DanielHindi/aws-s3-zipper.git",
-  "keywords": [
-    "zip",
-    "amazon",
-    "aws",
-    "s3"
-  ],
   "author": "Daniel Hindi",
   "license": "MIT",
   "readmeFilename": "README.md"
