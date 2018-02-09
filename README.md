@@ -34,7 +34,8 @@ var config ={
 var zipper = new S3Zipper(config);
 ```
 
-### Filter out files
+
+### Filter out Files
 ```
 zipper.filterOutFiles= function(file){
     if(file.Key.indexOf('.tmp') >= 0) // filter out temp files
@@ -145,7 +146,7 @@ zipper.zipToS3FileFragments({
 });
 ```
 
-##The Details
+## The Details
 ### `init`
 Either from the constructor or from the `init(config)` function you can pass along the AWS config object
 ```
