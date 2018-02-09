@@ -6,12 +6,19 @@ var fs = require('fs');
 var s3 = require('s3');
 
 function S3Zipper(awsConfig) {
-    assert.ok(awsConfig, 'AWS S3 options must be defined.');
-    assert.notEqual(awsConfig.accessKeyId, undefined, 'Requires S3 AWS Key.');
-    assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requires S3 AWS Secret');
-    assert.notEqual(awsConfig.region, undefined, 'Requires AWS S3 region.');
-    assert.notEqual(awsConfig.bucket, undefined, 'Requires AWS S3 bucket.');
-    this.init(awsConfig);
+    var self = this
+    AWS.config.getCredentials(function (err) {
+      if (err) {
+        assert.ok(awsConfig, 'AWS S3 options must be defined.');
+        assert.notEqual(awsConfig.accessKeyId, undefined, 'Requires S3 AWS Key.');
+        assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requires S3 AWS Secret');
+        assert.notEqual(awsConfig.region, undefined, 'Requires AWS S3 region.');
+        assert.notEqual(awsConfig.bucket, undefined, 'Requires AWS S3 bucket.');
+        self.init(awsConfig);
+      } else {
+        self.init(awsConfig)
+      }
+    })
 }
 
 
@@ -23,16 +30,24 @@ function listObjectInner() {
 S3Zipper.prototype = {
     init: function (awsConfig) {
         this.awsConfig = awsConfig;
-        AWS.config.update({
-            accessKeyId: awsConfig.accessKeyId,
-            secretAccessKey: awsConfig.secretAccessKey,
-            region: awsConfig.region
-        });
-        this.s3bucket = new AWS.S3({
-            params: {
-                Bucket: this.awsConfig.bucket
+        var self = this
+        AWS.config.getCredentials(function (err) {
+
+            if (err) {
+                AWS.config.update({
+                    accessKeyId: awsConfig.accessKeyId,
+                    secretAccessKey: awsConfig.secretAccessKey,
+                    region: awsConfig.region
+                });
             }
-        });
+
+            self.s3bucket = new AWS.S3({
+                params: {
+                    Bucket: self.awsConfig.bucket
+                }
+            });
+
+        })
 
     }
     , filterOutFiles: function (fileObj) {
