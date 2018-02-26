@@ -154,7 +154,8 @@ Either from the constructor or from the `init(config)` function you can pass alo
     accessKeyId: [Your access id],
     secretAccessKey: [your access key],
     region: [the region of your S3 bucket],
-    bucket: [your bucket name]
+    bucket: [your bucket name],
+    endpoint: [optional, for use with S3-compatible services]
 }
 ```
 
