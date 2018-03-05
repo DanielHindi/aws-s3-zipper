@@ -41,6 +41,12 @@ S3Zipper.prototype = {
                 });
             }
 
+            if (awsConfig.endpoint) {
+                AWS.config.update({
+                    endpoint: awsConfig.endpoint
+                });
+            }
+
             self.s3bucket = new AWS.S3({
                 params: {
                     Bucket: self.awsConfig.bucket
