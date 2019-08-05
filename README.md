@@ -72,7 +72,7 @@ app.all('/', function (request, response) {
         pipe: response
         , folderName: 'myBucketFolderName'
         , startKey: 'keyOfLastFileIZipped' // could keep null
-        , recursive, true
+        , recursive: true
         }
         ,function (err, result) {
             if(err)
