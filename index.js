@@ -306,12 +306,12 @@ S3Zipper.prototype = {
                         zipFileLocation: result.Location,
                         zippedFiles: r.zippedFiles
                     });
-                    fs.unlink(params.zipFileName);
+                    fs.unlinkSync(params.zipFileName);
                 });
             }
             else {
                 console.log('no files zipped. nothing to upload');
-                fs.unlink(params.zipFileName);
+                fs.unlinkSync(params.zipFileName);
                 callback(null, {
                     zipFileETag: null,
                     zipFileLocation: null,
@@ -382,7 +382,7 @@ S3Zipper.prototype = {
                 if (uploadResult) {
                     result.uploadedFile = uploadResult;
                     console.log('remove temp file ', localFragName);
-                    fs.unlink(localFragName);
+                    fs.unlinkSync(localFragName);
                 }
                 pendingUploads--;
                 if (pendingUploads == 0 && finalResult) {
@@ -483,7 +483,7 @@ S3Zipper.prototype = {
                 fileStream.close();
                 if (result.zippedFiles.length == 0) /// its an empty zip file get rid of it
 
-                    fs.unlink(fragFileName);
+                    fs.unlinkSync(fragFileName);
 
                 else
                     events.onFileZipped(fragFileName, result);
