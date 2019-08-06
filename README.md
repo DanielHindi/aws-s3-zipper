@@ -114,6 +114,7 @@ zipper.zipToS3File ({
         s3FolderName: 'myBucketFolderName'
         , startKey: 'keyOfLastFileIZipped' // optional
         , s3ZipFileName: 'myS3File.zip'
+        , tmpDir: "/tmp" // optional, defaults to node_modules/aws-s3-zipper
     },function(err,result){
         if(err)
             console.error(err);
@@ -133,6 +134,7 @@ zipper.zipToS3FileFragments({
     , s3ZipFileName: 'myS3File.zip'
     , maxFileCount: 5
     , maxFileSize: 1024*1024
+    , tmpDir: "/tmp" // optional, defaults to node_modules/aws-s3-zipper
     },function(err, results){
     if(err)
         console.error(err);
