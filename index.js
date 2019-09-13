@@ -273,25 +273,28 @@ S3Zipper.prototype = {
         s3FolderName: the name of the folder within the S3 bucket
         , startKey: the key of the file you want to start after. keep null if you want to start from the first file
         , s3ZipFileName: the name of the file you to zip to and upload to S3
+        , tmpDir: specifies the directory of the temporal zip file, default is node_modules/aws-s3-zipper
         , recursive: indicates to zip nested folders or not
        }
        , callback: function
     */
     , zipToS3File: function (params, callback) {
 
-        if(arguments.length == 4){
+        if(arguments.length == 5){
             // for backward compatibility
             params = {
                 s3FolderName:arguments[0]
                 ,startKey:arguments[1]
                 ,s3ZipFileName:arguments[2]
+                ,tmpDir:arguments[3]
                 ,recursive: false
             };
-            callback= arguments[3];
+            callback= arguments[4];
         }
 
         var t = this;
-        params.zipFileName = '__' + Date.now() + '.zip';
+        params.tmpDir = params.tmpDir?params.tmpDir+"/":""
+        params.zipFileName = params.tmpDir+'__' + Date.now() + '.zip';
 
         if (params.s3ZipFileName.indexOf('/') < 0)
             params.s3ZipFileName = params.s3FolderName + "/" + params.s3ZipFileName;
@@ -330,13 +333,14 @@ S3Zipper.prototype = {
         , s3ZipFileName: the name of the file you to zip to and upload to S3
         , maxFileCount: an integer that caps off how many files to zip at a time
         , maxFileSize: max total size of files before they are zipped
+        , tmpDir: specifies the directory of the temporal zip file, default is node_modules/aws-s3-zipper
         , recursive: indicates to zip nested folders or not
      }
      , callback: function
     */
     , zipToS3FileFragments: function (params, callback) {
 
-        if(arguments.length == 6){
+        if(arguments.length == 7){
             // for backward compatibility
             params = {
                 s3FolderName:arguments[0]
@@ -344,14 +348,16 @@ S3Zipper.prototype = {
                 , s3ZipFileName:arguments[2]
                 , maxFileCount:arguments[3]
                 , maxFileSize:arguments[4]
+                , tmpDir:arguments[5]
                 , recursive: false
             };
-            callback= arguments[5];
+            callback= arguments[6];
         }
 
         var t = this;
         ///local file
-        params.zipFileName = '__' + Date.now() + '.zip';
+        params.tmpDir = params.tmpDir?params.tmpDir+"/":""
+        params.zipFileName = params.tmpDir+'__' + Date.now() + '.zip';
 
         if (params.s3ZipFileName.indexOf('/') < 0)
             params.s3ZipFileName = params.s3FolderName + "/" + params.s3ZipFileName;
