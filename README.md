@@ -34,6 +34,7 @@ var config ={
 var zipper = new S3Zipper(config);
 ```
 
+
 ### Filter out Files
 ```
 zipper.filterOutFiles= function(file){
@@ -63,6 +64,25 @@ zipper.zipToFile ({
 });
 ```
 
+### Pipe zip data to stream (using Express.js)
+```
+app.all('/', function (request, response) {
+    response.set('content-type', 'application/zip') // optional
+    zipper.streamZipDataTo({
+        pipe: response
+        , folderName: 'myBucketFolderName'
+        , startKey: 'keyOfLastFileIZipped' // could keep null
+        , recursive: true
+        }
+        ,function (err, result) {
+            if(err)
+                console.error(err);
+            else{
+                console.log(result)
+            }
+        })
+})
+```
 
 ### Zip fragments to local file system with the filename pattern with a maximum file count
 ```
@@ -94,6 +114,7 @@ zipper.zipToS3File ({
         s3FolderName: 'myBucketFolderName'
         , startKey: 'keyOfLastFileIZipped' // optional
         , s3ZipFileName: 'myS3File.zip'
+        , tmpDir: "/tmp" // optional, defaults to node_modules/aws-s3-zipper
     },function(err,result){
         if(err)
             console.error(err);
@@ -113,6 +134,7 @@ zipper.zipToS3FileFragments({
     , s3ZipFileName: 'myS3File.zip'
     , maxFileCount: 5
     , maxFileSize: 1024*1024
+    , tmpDir: "/tmp" // optional, defaults to node_modules/aws-s3-zipper
     },function(err, results){
     if(err)
         console.error(err);
@@ -134,7 +156,8 @@ Either from the constructor or from the `init(config)` function you can pass alo
     accessKeyId: [Your access id],
     secretAccessKey: [your access key],
     region: [the region of your S3 bucket],
-    bucket: [your bucket name]
+    bucket: [your bucket name],
+    endpoint: [optional, for use with S3-compatible services]
 }
 ```
 
