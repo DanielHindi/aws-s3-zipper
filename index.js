@@ -8,8 +8,10 @@ var s3 = require('s3');
 function S3Zipper(awsConfig) {
     var self = this
     assert.ok(awsConfig, 'AWS S3 options must be defined.');
-    assert.notEqual(awsConfig.accessKeyId, undefined, 'Requires S3 AWS Key.');
-    assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requires S3 AWS Secret');
+    if (!awsConfig.useCredentials) {
+        assert.notEqual(awsConfig.accessKeyId, undefined, 'Requires S3 AWS Key.');
+        assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requires S3 AWS Secret');
+    }
     assert.notEqual(awsConfig.region, undefined, 'Requires AWS S3 region.');
     assert.notEqual(awsConfig.bucket, undefined, 'Requires AWS S3 bucket.');
 
@@ -41,12 +43,10 @@ S3Zipper.prototype = {
     , filterOutFiles: function (fileObj) {
         return fileObj;
     }
-    , calculateFileName: function (f) {
+    , calculateFileName: function (f, params) {
         var name = f.Key.split("/");
         name.shift();
-        name = name.join("/");
-        return name;
-
+        return !params.folderPath ? name[name.length-1] : name.join("/");
     }
 
     /*
@@ -184,7 +184,7 @@ S3Zipper.prototype = {
                             callback(err);
                         else {
 
-                            var name = t.calculateFileName(f);
+                            var name = t.calculateFileName(f, params);
 
                             if (name === ""){
                                 callback(null, f);
@@ -270,6 +270,7 @@ S3Zipper.prototype = {
                 ,s3ZipFileName:arguments[2]
                 ,tmpDir:arguments[3]
                 ,recursive: false
+                ,folderPath: typeof params.folderPath == 'boolean' ? params.folderPath : true
             };
             callback= arguments[4];
         }
@@ -399,6 +400,7 @@ S3Zipper.prototype = {
                 , startKey:arguments[1]
                 , zipFileName:arguments[2]
                 , recursive: false
+                , folderPath: params.folderPath
             };
             callback= arguments[3];
         }
