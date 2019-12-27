@@ -177,7 +177,7 @@ S3Zipper.prototype = {
                 console.error(err);
             else {
                 var files = clearedFiles.files;
-                console.log("files", files);
+                // console.log("files", files);
                 async.map(files, function (f, callback) {
                     t.s3bucket.getObject({Bucket: t.awsConfig.bucket, Key: f.Key}, function (err, data) {
                         if (err)
@@ -225,7 +225,7 @@ S3Zipper.prototype = {
     , uploadLocalFileToS3: function (localFileName, s3ZipFileName, callback) {
         console.log('uploading ', s3ZipFileName, '...');
         var readStream = fs.createReadStream(localFileName);//tempFile
-
+        var previousPercent = 0;
         this.s3bucket.upload({
                 Bucket: this.awsConfig.bucket
                 , Key: s3ZipFileName
@@ -234,8 +234,10 @@ S3Zipper.prototype = {
             })
             .on('httpUploadProgress', function (e) {
                 var p = Math.round(e.loaded / e.total * 100);
-                if (p % 10 == 0)
+                if ((previousPercent < p || previousPercent === 0) && p % 10 == 0){
                     console.log('upload progress', p, '%');
+                    previousPercent = p || 1;
+                }
 
             })
             .send(function (err, result) {
