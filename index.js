@@ -107,7 +107,8 @@ S3Zipper.prototype = {
         });
 
         emitter.on('error', function(err) {
-            console.error('unable to upload:', err.stack);
+            console.error('unable to get files:', err.stack);
+            callback(err);
         });
 
         emitter.on('end', function () {
