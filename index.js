@@ -3,7 +3,7 @@ var archiver = require('archiver');
 var async = require('async');
 var AWS = require('aws-sdk');
 var fs = require('fs');
-var s3 = require('s3');
+var s3 = require('@auth0/s3');
 
 function S3Zipper(awsConfig) {
     var self = this
@@ -30,12 +30,6 @@ function S3Zipper(awsConfig) {
     }
     self.init(awsConfig);
 }
-
-
-function listObjectInner() {
-
-}
-
 
 S3Zipper.prototype = {
     init: function (awsConfig) {
@@ -119,6 +113,11 @@ S3Zipper.prototype = {
             if(data && data.Contents) {
                 files.Contents = files.Contents.concat(data.Contents);
             }
+        });
+
+        emitter.on('error', function(err) {
+            console.error('unable to get files:', err.stack);
+            callback(err);
         });
 
         emitter.on('end', function () {
