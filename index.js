@@ -3,30 +3,33 @@ var archiver = require('archiver');
 var async = require('async');
 var AWS = require('aws-sdk');
 var fs = require('fs');
-var s3 = require('s3');
+var s3 = require('@auth0/s3');
 
 function S3Zipper(awsConfig) {
     var self = this
     assert.ok(awsConfig, 'AWS S3 options must be defined.');
-    assert.notEqual(awsConfig.accessKeyId, undefined, 'Requires S3 AWS Key.');
-    assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requires S3 AWS Secret');
-    assert.notEqual(awsConfig.region, undefined, 'Requires AWS S3 region.');
     assert.notEqual(awsConfig.bucket, undefined, 'Requires AWS S3 bucket.');
 
-    AWS.config.update({
-        accessKeyId: awsConfig.accessKeyId,
-        secretAccessKey: awsConfig.secretAccessKey,
-        region: awsConfig.region
-    });
-
+    /* region is optional in order to use lambda's region */
+    awsConfig.region = awsConfig.region ? awsConfig.region : AWS.config.region;
+    if(!awsConfig.accessKeyId && !awsConfig.secretAccessKey){
+        /*
+        accessKey & secretAccessKey must be optional in order to use grants associated to the lambda function through IAM service
+         */
+        AWS.config.update({
+            region: awsConfig.region
+        });
+    }else{
+        assert.notEqual(awsConfig.accessKeyId, undefined, 'Requires S3 AWS Key.');
+        assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requires S3 AWS Secret');
+        AWS.config.update({
+            accessKeyId: awsConfig.accessKeyId,
+            secretAccessKey: awsConfig.secretAccessKey,
+            region: awsConfig.region
+        });
+    }
     self.init(awsConfig);
 }
-
-
-function listObjectInner() {
-
-}
-
 
 S3Zipper.prototype = {
     init: function (awsConfig) {
@@ -110,6 +113,11 @@ S3Zipper.prototype = {
             if(data && data.Contents) {
                 files.Contents = files.Contents.concat(data.Contents);
             }
+        });
+
+        emitter.on('error', function(err) {
+            console.error('unable to get files:', err.stack);
+            callback(err);
         });
 
         emitter.on('end', function () {
