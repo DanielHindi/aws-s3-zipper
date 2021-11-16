@@ -6,7 +6,7 @@
   "dependencies": {
     "archiver": "0.21.*",
     "async": "1.5.*",
-    "aws-sdk": "2.2.*",
+    "aws-sdk": "2.814.*",
     "@auth0/s3": "latest"
   },
   "repository": "https://github.com/DanielHindi/aws-s3-zipper.git",
