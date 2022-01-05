@@ -160,7 +160,17 @@ Either from the constructor or from the `init(config)` function you can pass alo
     endpoint: [optional, for use with S3-compatible services]
 }
 ```
-
+If using temporary credentials
+```
+{
+    accessKeyId: [Your access id],
+    secretAccessKey: [your access key],
+    sessionToken: [your session token],
+    region: [the region of your S3 bucket],
+    bucket: [your bucket name],
+    endpoint: [optional, for use with S3-compatible services]
+}
+```
 ### `filterOutFiles(file)`
 Override this function when you want to filter out certain files. The `file` param that is passed to you is the format of the aws file
 * file
