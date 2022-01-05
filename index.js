@@ -13,7 +13,7 @@ function S3Zipper(awsConfig) {
     assert.notEqual(awsConfig.region, undefined, 'Requires AWS S3 region.');
     assert.notEqual(awsConfig.bucket, undefined, 'Requires AWS S3 bucket.');
     
-    if(aswConfig.sessionToken) {
+    if(awsConfig.sessionToken) {
         AWS.config.update({
             accessKeyId: awsConfig.accessKeyId,
             secretAccessKey: awsConfig.secretAccessKey,
