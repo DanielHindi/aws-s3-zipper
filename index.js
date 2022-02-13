@@ -12,20 +12,23 @@ function S3Zipper(awsConfig) {
     assert.notEqual(awsConfig.secretAccessKey, undefined, 'Requires S3 AWS Secret');
     assert.notEqual(awsConfig.region, undefined, 'Requires AWS S3 region.');
     assert.notEqual(awsConfig.bucket, undefined, 'Requires AWS S3 bucket.');
+
+    var configParams = {
+        accessKeyId: awsConfig.accessKeyId,
+        secretAccessKey: awsConfig.secretAccessKey,
+        region: awsConfig.region
+    };
+
+    if (awsConfig.sessionToken)
+        configParams.sessionToken = awsConfig.sessionToken;
     
-    if(awsConfig.sessionToken) {
-        AWS.config.update({
-            accessKeyId: awsConfig.accessKeyId,
-            secretAccessKey: awsConfig.secretAccessKey,
-            sessionToken: awsConfig.sessionToken,
-            region: awsConfig.region
-        }); } 
-    else {
-        AWS.config.update({
-            accessKeyId: awsConfig.accessKeyId,
-            secretAccessKey: awsConfig.secretAccessKey,
-            region: awsConfig.region
-    }
+    if (awsConfig.endpoint)
+        configParams.endpoint = awsConfig.endpoint;
+
+    if (awsConfig.s3ForcePathStyle)
+        configParams.s3ForcePathStyle = awsConfig.s3ForcePathStyle;
+
+    AWS.config.update(configParams);
 
     self.init(awsConfig);
 }

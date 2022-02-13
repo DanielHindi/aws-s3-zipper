@@ -157,7 +157,9 @@ Either from the constructor or from the `init(config)` function you can pass alo
     secretAccessKey: [your access key],
     region: [the region of your S3 bucket],
     bucket: [your bucket name],
-    endpoint: [optional, for use with S3-compatible services]
+    endpoint: [optional, for use with S3-compatible services],
+    s3ForcePathStyle: [optional, whether to force path style URLs for S3 objects]
+
 }
 ```
 If using temporary credentials
@@ -168,7 +170,8 @@ If using temporary credentials
     sessionToken: [your session token],
     region: [the region of your S3 bucket],
     bucket: [your bucket name],
-    endpoint: [optional, for use with S3-compatible services]
+    endpoint: [optional, for use with S3-compatible services],
+    s3ForcePathStyle: [optional, whether to force path style URLs for S3 objects]
 }
 ```
 ### `filterOutFiles(file)`
