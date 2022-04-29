@@ -5,7 +5,7 @@
   "main": "index.js",
   "dependencies": {
     "archiver": "0.21.*",
-    "async": "1.5.*",
+    "async": "2.6.*",
     "aws-sdk": "2.814.*",
     "@auth0/s3": "latest"
   },
