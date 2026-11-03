@@ -94,6 +94,14 @@ app.get('/download', async (req, res, next) => {
 
 If the client disconnects the archive is aborted and no further objects are fetched.
 
+### Cancelling
+
+```js
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 30_000);
+await zipper.zipToS3File({ s3FolderName: 'photos', s3ZipFileName: 'photos.zip', signal: controller.signal });
+```
+
 ### Zip to local fragments
 
 ```js
@@ -148,6 +156,7 @@ All list-style methods accept these common params:
 | `maxFileSize` | Max total bytes (pre-compression) per batch. An object larger than this is zipped alone if it is first in the batch, otherwise the batch ends before it. |
 | `recursive` | Include nested "folders". Default `false`. |
 | `archiverOptions` | Passed to `archiver('zip', options)` (e.g. `{ zlib: { level: 9 } }`). |
+| `signal` | An `AbortSignal`. Aborting cancels listing, object fetches, archiving and any in-progress upload, and the call rejects with `signal.reason` (an `AbortError` by default). |
 
 ### `scanFiles(params, stats?)` → `AsyncGenerator<file>`
 

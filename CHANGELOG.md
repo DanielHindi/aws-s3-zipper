@@ -15,6 +15,7 @@ Full rewrite on AWS SDK v3 with a Promise-based API. See the README's "Migrating
 - `scanFiles()` async generator; listing is lazy and stops paginating at the batch cut-off. `pageSize` option.
 - Object fetches use a sliding window of `concurrency` with per-entry back-pressure, so memory stays bounded.
 - `uploadOptions` passthrough to `@aws-sdk/lib-storage`.
+- `signal` (AbortSignal) param on every method; cancels listing, fetches, archiving and uploads.
 - `onFragment` hook for fragment methods.
 - TypeScript definitions. Closes #37, #49.
 - Test suite (`node --test` with mocked S3), ESLint, GitHub Actions CI.

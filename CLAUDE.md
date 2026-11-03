@@ -50,6 +50,7 @@ Invariants that are easy to break:
 - **Prefix handling** goes through `toPrefix()`: `''` means the bucket root, leading/trailing slashes are stripped.
 - **No buffering**: `GetObject` bodies are passed to archiver as streams. Do not read them into memory.
 - **Logging** only via `this.logger` (silent by default). No `console.*` in library code.
+- **AbortSignal** must reach every I/O: `_pages()` and `GetObject` get `{ abortSignal }`, `_startUpload()` wires it to lib-storage's `abortController`, and `streamZipDataTo` fails the archive on `abort`. Listeners are removed on completion. `Upload.done()` may only be called once per instance.
 
 ## Tests
 

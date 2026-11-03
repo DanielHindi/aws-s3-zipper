@@ -42,6 +42,8 @@ export interface ListParams {
   /** Max total bytes (pre-compression) per batch. */
   maxFileSize?: number;
   recursive?: boolean;
+  /** Cancels listing, object fetches, archiving and uploads. */
+  signal?: AbortSignal;
 }
 
 export interface ScanStats {
@@ -75,6 +77,7 @@ export interface ZipToFileParams {
   maxFileCount?: number;
   maxFileSize?: number;
   recursive?: boolean;
+  signal?: AbortSignal;
   archiverOptions?: ArchiverOptions;
 }
 
@@ -94,6 +97,7 @@ export interface ZipToS3FileParams {
   maxFileCount?: number;
   maxFileSize?: number;
   recursive?: boolean;
+  signal?: AbortSignal;
   contentType?: string;
   archiverOptions?: ArchiverOptions;
 }
@@ -133,7 +137,7 @@ declare class S3Zipper {
   uploadLocalFileToS3(
     localFileName: string,
     s3Key: string,
-    options?: { contentType?: string },
+    options?: { contentType?: string; signal?: AbortSignal },
   ): Promise<CompleteMultipartUploadCommandOutput>;
   zipToS3File(params: ZipToS3FileParams): Promise<ZipToS3FileResult>;
   zipToS3FileFragments(params: ZipToS3FileFragmentsParams): Promise<ZipToS3FileResult[]>;

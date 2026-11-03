@@ -8,7 +8,7 @@ const archiver = require('archiver');
 const {
   S3Client,
   GetObjectCommand,
-  paginateListObjectsV2,
+  ListObjectsV2Command,
 } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 
@@ -55,6 +55,11 @@ function fragmentName(fileName, index) {
   const ext = path.extname(fileName);
   const base = ext ? fileName.slice(0, -ext.length) : fileName;
   return `${base}_${index}${ext || '.zip'}`;
+}
+
+/** The error to reject with when `signal` has been aborted. */
+function abortReason(signal) {
+  return signal?.reason ?? new DOMException('The operation was aborted', 'AbortError');
 }
 
 function ensureZipExtension(fileName) {
@@ -123,7 +128,7 @@ class S3Zipper {
    * @param {{totalFilesScanned: number, lastScannedFile?: object}} stats
    */
   async *scanFiles(params = {}, stats = { totalFilesScanned: 0, lastScannedFile: undefined }) {
-    const { startKey, maxFileCount, maxFileSize, recursive = false } = params;
+    const { startKey, maxFileCount, maxFileSize, recursive = false, signal } = params;
     const prefix = toPrefix(params.folderName);
 
     const input = { Bucket: this.bucket, Prefix: prefix };
@@ -135,7 +140,7 @@ class S3Zipper {
     let passedCount = 0;
     let totalSize = 0;
 
-    for await (const page of paginateListObjectsV2({ client: this.s3 }, input)) {
+    for await (const page of this._pages(input, signal)) {
       for (const file of page.Contents || []) {
         if (maxFileCount > 0 && stats.totalFilesScanned >= maxFileCount) return;
         stats.totalFilesScanned += 1;
@@ -199,6 +204,9 @@ class S3Zipper {
       throw new TypeError('S3Zipper.streamZipDataTo: pass either "pipe" or "createPipe", not both');
     }
 
+    const { signal } = params;
+    signal?.throwIfAborted();
+
     const prefix = toPrefix(params.folderName);
     const stats = { totalFilesScanned: 0, lastScannedFile: undefined };
 
@@ -213,6 +221,8 @@ class S3Zipper {
       };
       archive.once('error', failed);
     });
+    const onAbort = () => failed(abortReason(signal));
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     let pipe = null;
     const attach = (dest) => {
@@ -235,6 +245,7 @@ class S3Zipper {
       if (!name) return { file, name: null, body: null };
       const { Body } = await this.s3.send(
         new GetObjectCommand({ Bucket: this.bucket, Key: file.Key }),
+        { abortSignal: signal },
       );
       return { file, name, body: Body };
     };
@@ -280,7 +291,11 @@ class S3Zipper {
     })();
     work.catch(() => {});
 
-    await Promise.race([work, failure]);
+    try {
+      await Promise.race([work, failure]);
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
 
     const zip = archive;
     zip.manifest = zippedFiles;
@@ -355,8 +370,7 @@ class S3Zipper {
       ...this._listParams(params),
       createPipe: () => {
         const pass = new PassThrough();
-        const upload = this._createUpload(pass, s3Key, params.contentType);
-        uploadDone = upload.done();
+        uploadDone = this._startUpload(pass, s3Key, params.contentType, params.signal);
         // If the upload fails, tear down the pipe so the archive stops.
         uploadDone.catch((err) => pass.destroy(err));
         return pass;
@@ -408,10 +422,11 @@ class S3Zipper {
   /**
    * Upload a local file to S3 with multipart support.
    */
-  async uploadLocalFileToS3(localFileName, s3Key, { contentType = 'application/zip' } = {}) {
+  async uploadLocalFileToS3(localFileName, s3Key, { contentType = 'application/zip', signal } = {}) {
+    signal?.throwIfAborted();
     const body = fs.createReadStream(localFileName);
     try {
-      const result = await this._createUpload(body, s3Key, contentType).done();
+      const result = await this._startUpload(body, s3Key, contentType, signal);
       this.logger.info('upload completed', { key: s3Key });
       return result;
     } finally {
@@ -419,11 +434,17 @@ class S3Zipper {
     }
   }
 
-  _createUpload(body, s3Key, contentType = 'application/zip') {
+  /**
+   * Start a multipart upload of `body` and return its completion promise.
+   * Progress is logged once per 10% when the total size is known.
+   */
+  _startUpload(body, s3Key, contentType = 'application/zip', signal) {
     this.logger.info('uploading', { key: s3Key });
+    const abortController = new AbortController();
     const upload = new Upload({
       client: this.s3,
       ...this.uploadOptions,
+      abortController,
       params: { Bucket: this.bucket, Key: s3Key, ContentType: contentType, Body: body },
     });
 
@@ -439,7 +460,12 @@ class S3Zipper {
         this.logger.debug('upload progress', { key: s3Key, loaded: progress.loaded, part: progress.part });
       }
     });
-    return upload;
+
+    if (!signal) return upload.done();
+
+    const onAbort = () => abortController.abort(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    return upload.done().finally(() => signal.removeEventListener('abort', onAbort));
   }
 
   /**
@@ -451,6 +477,7 @@ class S3Zipper {
     let startKey = params.startKey;
 
     for (;;) {
+      params.signal?.throwIfAborted();
       const result = await runFragment(startKey, results.length + 1);
       if (result.zippedFiles.length > 0) {
         results.push(result);
@@ -463,6 +490,20 @@ class S3Zipper {
     return results;
   }
 
+  /** ListObjectsV2 pagination that honours an AbortSignal. */
+  async *_pages(input, signal) {
+    let ContinuationToken;
+    do {
+      signal?.throwIfAborted();
+      const page = await this.s3.send(
+        new ListObjectsV2Command({ ...input, ContinuationToken }),
+        { abortSignal: signal },
+      );
+      yield page;
+      ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (ContinuationToken);
+  }
+
   _listParams(params) {
     return {
       folderName: params.s3FolderName,
@@ -471,6 +512,7 @@ class S3Zipper {
       maxFileSize: params.maxFileSize,
       recursive: params.recursive,
       archiverOptions: params.archiverOptions,
+      signal: params.signal,
     };
   }
 

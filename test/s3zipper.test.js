@@ -433,6 +433,77 @@ test('streamZipDataTo with createPipe never creates the pipe for an empty folder
   assert.deepEqual(result.zippedFiles, []);
 });
 
+test('AbortSignal', async (t) => {
+  await t.test('an already-aborted signal rejects before any request', async () => {
+    const { zipper, mock } = makeZipper();
+    const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
+    const signal = AbortSignal.abort();
+    await assert.rejects(zipper.zipToFile({ s3FolderName: 'photos', zipFileName: path.join(tmpDir(), 'x.zip'), signal }), { name: 'AbortError' });
+    await assert.rejects(zipper.zipToS3File({ s3FolderName: 'photos', s3ZipFileName: 'x.zip', signal }), { name: 'AbortError' });
+    await assert.rejects(zipper.getFiles({ folderName: 'photos', signal }), { name: 'AbortError' });
+    assert.equal(mock.commandCalls(ListObjectsV2Command).length, 0);
+  });
+
+  await t.test('aborting mid-stream stops fetching and rejects', async () => {
+    const { zipper, mock } = makeZipper(SAMPLE, { concurrency: 1 });
+    const { GetObjectCommand } = require('@aws-sdk/client-s3');
+    const { Readable } = require('node:stream');
+    const controller = new AbortController();
+    let fetches = 0;
+    mock.on(GetObjectCommand).callsFake(async (input) => {
+      fetches += 1;
+      if (fetches === 2) controller.abort();
+      return { Body: Readable.from([Buffer.from(SAMPLE[input.Key])]) };
+    });
+    const out = collector();
+    await assert.rejects(
+      zipper.streamZipDataTo({ pipe: out, folderName: 'photos', recursive: true, signal: controller.signal }),
+      { name: 'AbortError' },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    assert.ok(fetches <= 3, `kept fetching after abort: ${fetches}`);
+  });
+
+  await t.test('uses signal.reason when provided', async () => {
+    const { zipper } = makeZipper();
+    const signal = AbortSignal.abort(new Error('custom reason'));
+    await assert.rejects(zipper.getFiles({ folderName: 'photos', signal }), /custom reason/);
+  });
+
+  await t.test('aborting during the upload rejects zipToS3File', async () => {
+    const { zipper, mock } = makeZipper();
+    const { PutObjectCommand } = require('@aws-sdk/client-s3');
+    const controller = new AbortController();
+    mock.on(PutObjectCommand).callsFake(async () => {
+      controller.abort();
+      await new Promise((r) => setTimeout(r, 50));
+      return { ETag: '"late"' };
+    });
+    await assert.rejects(
+      zipper.zipToS3File({ s3FolderName: 'photos', s3ZipFileName: 'x.zip', signal: controller.signal }),
+      { name: 'AbortError' },
+    );
+  });
+
+  await t.test('fragment loops stop between fragments', async () => {
+    const { zipper } = makeZipper();
+    const controller = new AbortController();
+    const dir = tmpDir();
+    await assert.rejects(
+      zipper.zipToFileFragments({
+        s3FolderName: 'photos',
+        zipFileName: path.join(dir, 'f.zip'),
+        maxFileCount: 2,
+        recursive: true,
+        signal: controller.signal,
+        onFragment: () => controller.abort(),
+      }),
+      { name: 'AbortError' },
+    );
+    assert.deepEqual(fs.readdirSync(dir), ['f_1.zip']);
+  });
+});
+
 test('logger receives progress messages', async () => {
   const messages = [];
   const logger = {
