@@ -12,7 +12,7 @@ Built with `tsup` into `dist/` as ESM (`index.mjs`), CJS (`index.cjs`) and decla
 
 - Install: `npm install`
 - Build: `npm run build` (tsup). Tests require a build; `npm test` runs it via `pretest`.
-- Test: `npm test` (Node's built-in `node --test`, no network; S3 is mocked with `aws-sdk-client-mock`)
+- Test: `npm test` (Node's built-in `node --test` over `test/*.test.js`; the shell glob matters, a bare directory argument only works on Node 26+)
 - Single test file (after a build): `node --test test/s3zipper.test.js`
 - Single test by name: `node --test --test-name-pattern="maxFileSize" test/`
 - Integration only: `npm run test:integration`. Runs over real HTTP. With `S3ZIPPER_TEST_ENDPOINT` (+ `_ACCESS_KEY`, `_SECRET_KEY`, optional `_BUCKET`, `_REGION`) it targets MinIO/S3; without it, `test/fake-s3-server.js` is started in-process. CI runs it against a MinIO service container.
