@@ -41,7 +41,8 @@ Credentials are optional. When omitted the AWS SDK default credential chain is u
 | `clientConfig` | Any extra `S3ClientConfig` merged into the client. |
 | `s3Client` | Bring your own `S3Client` instance (the options above are then ignored). |
 | `concurrency` | Parallel `GetObject` requests while zipping. Default `10`. |
-| `tmpDir` | Where temporary zips are written for the S3 upload methods. Default `os.tmpdir()`. |
+| `pageSize` | Objects per listing page, 1 to 1000. Default `1000`. |
+| `uploadOptions` | Extra options for the multipart `Upload` (`partSize`, `queueSize`, `tags`, ...). |
 | `logger` | Object with `debug`, `info`, `warn`, `error`. Silent by default. Pass `console` to see progress. |
 
 ### Filter out files
@@ -148,13 +149,17 @@ All list-style methods accept these common params:
 | `recursive` | Include nested "folders". Default `false`. |
 | `archiverOptions` | Passed to `archiver('zip', options)` (e.g. `{ zlib: { level: 9 } }`). |
 
+### `scanFiles(params, stats?)` → `AsyncGenerator<file>`
+
+Lazily yields objects that pass `filterOutFiles`, page by page, stopping at the batch cut-off. `stats` (`{ totalFilesScanned, lastScannedFile }`) is updated as the scan proceeds.
+
 ### `getFiles(params)` → `{ files, totalFilesScanned, lastScannedFile }`
 
-Lists objects and applies `filterOutFiles` and the batching rules. `totalFilesScanned` counts filtered-out objects too; `lastScannedFile` is where the next batch should resume.
+Collects `scanFiles` into an array. `totalFilesScanned` counts filtered-out objects too; `lastScannedFile` is where the next batch should resume.
 
 ### `streamZipDataTo(params)` → `{ zip, zippedFiles, totalFilesScanned, lastScannedFile }`
 
-Writes a zip into `params.pipe` (any Writable). Resolves once the archive has finished. `zip` is the archiver instance with a `manifest` property equal to `zippedFiles`.
+Writes a zip into `params.pipe` (any Writable). Resolves once the archive has finished. `zip` is the archiver instance with a `manifest` property equal to `zippedFiles`. Pass `createPipe` instead of `pipe` to create the destination lazily; it is only called when the first entry is written, so an empty folder writes nothing.
 
 ### `zipToFile(params)` → `{ ..., zipFileName }`
 
@@ -166,15 +171,15 @@ Repeats `zipToFile` from `lastScannedFile` until the folder is exhausted. Fragme
 
 ### `zipToS3File(params)` → `{ zipFileKey, zipFileETag, zipFileLocation, zippedFiles }`
 
-Zips to a temp file in `tmpDir` and uploads it with multipart upload. If `s3ZipFileName` has no `/` it is placed inside `s3FolderName`. Temp files are always removed.
+Streams the archive straight into a multipart upload; nothing touches the local disk, so it works on Lambda and other read-only filesystems. If `s3ZipFileName` has no `/` it is placed inside `s3FolderName`. When the folder yields no entries nothing is uploaded and `zipFileKey` is `null`. The result also carries `totalFilesScanned` and `lastScannedFile`.
 
 ### `zipToS3FileFragments(params)` → `result[]`
 
-Fragments uploaded as `key_1.zip`, `key_2.zip`, ... Each result has `s3Key` and `uploadedFile`.
+Fragments streamed and uploaded as `key_1.zip`, `key_2.zip`, ... Each result has the same shape as `zipToS3File`.
 
 ### `uploadLocalFileToS3(localFileName, s3Key, { contentType })`
 
-Multipart upload helper used by the S3 methods.
+Multipart upload helper for an existing local file.
 
 ## TypeScript
 
@@ -193,7 +198,7 @@ Version 2 is a rewrite. Breaking changes:
 - **No positional arguments.** Pass a params object to every method.
 - **AWS SDK v3.** `aws-sdk` and `@auth0/s3` are no longer dependencies. `accessKeyId`/`secretAccessKey`/`region` are now optional. `s3ForcePathStyle` is accepted as an alias of `forcePathStyle`.
 - **Silent by default.** Pass `logger: console` to get the old progress output.
-- **Temp files** default to `os.tmpdir()` instead of the current working directory.
+- **No temp files.** The S3 methods stream directly into a multipart upload. The `tmpDir` param is gone.
 - **Fragment naming** is consistent and 1-based for both local and S3 fragments (`name_1.zip`, `name_2.zip`, ...). Previously the first local fragment had no suffix and S3 fragments were 0-based.
 - `zipToFileFragments` no longer returns an `events` object; use `params.onFragment` instead.
 - Fragment methods reject on the first error instead of collecting errors.

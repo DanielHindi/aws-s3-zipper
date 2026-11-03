@@ -2,6 +2,7 @@ import type { Writable } from 'node:stream';
 import type { Archiver, ArchiverOptions } from 'archiver';
 import type { S3Client, S3ClientConfig, _Object } from '@aws-sdk/client-s3';
 import type { CompleteMultipartUploadCommandOutput } from '@aws-sdk/client-s3';
+import type { Options as UploadOptions } from '@aws-sdk/lib-storage';
 
 export interface Logger {
   debug(...args: unknown[]): void;
@@ -25,7 +26,8 @@ export interface S3ZipperOptions {
   concurrency?: number;
   /** Objects per ListObjectsV2 page (1-1000). */
   pageSize?: number;
-  tmpDir?: string;
+  /** Extra options for @aws-sdk/lib-storage Upload (partSize, queueSize, tags, ...). */
+  uploadOptions?: Omit<UploadOptions, 'client' | 'params'>;
   logger?: Logger;
 }
 
@@ -52,7 +54,10 @@ export interface GetFilesResult extends ScanStats {
 }
 
 export interface StreamParams extends ListParams {
+  /** Destination stream, attached immediately. */
   pipe?: Writable;
+  /** Lazily created destination; only called when the first entry is written. */
+  createPipe?: () => Writable | Promise<Writable>;
   archiverOptions?: ArchiverOptions;
 }
 
@@ -89,24 +94,19 @@ export interface ZipToS3FileParams {
   maxFileCount?: number;
   maxFileSize?: number;
   recursive?: boolean;
-  tmpDir?: string;
+  contentType?: string;
   archiverOptions?: ArchiverOptions;
 }
 
-export interface ZipToS3FileResult {
+export interface ZipToS3FileResult extends ScanStats {
   zipFileETag: string | null;
   zipFileLocation: string | null;
-  zipFileKey?: string;
+  zipFileKey: string | null;
   zippedFiles: S3File[];
 }
 
-export interface ZipToS3FragmentResult extends ZipToFileResult {
-  uploadedFile: CompleteMultipartUploadCommandOutput;
-  s3Key: string;
-}
-
 export interface ZipToS3FileFragmentsParams extends ZipToS3FileParams {
-  onFragment?: (result: ZipToS3FragmentResult, index: number) => void | Promise<void>;
+  onFragment?: (result: ZipToS3FileResult, index: number) => void | Promise<void>;
 }
 
 declare class S3Zipper {
@@ -116,7 +116,7 @@ declare class S3Zipper {
   logger: Logger;
   concurrency: number;
   pageSize: number;
-  tmpDir: string;
+  uploadOptions: Omit<UploadOptions, 'client' | 'params'>;
   s3: S3Client;
 
   /** Override to exclude objects; return a falsy value to skip. */
@@ -136,7 +136,7 @@ declare class S3Zipper {
     options?: { contentType?: string },
   ): Promise<CompleteMultipartUploadCommandOutput>;
   zipToS3File(params: ZipToS3FileParams): Promise<ZipToS3FileResult>;
-  zipToS3FileFragments(params: ZipToS3FileFragmentsParams): Promise<ZipToS3FragmentResult[]>;
+  zipToS3FileFragments(params: ZipToS3FileFragmentsParams): Promise<ZipToS3FileResult[]>;
 }
 
 export { S3Zipper };

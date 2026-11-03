@@ -332,7 +332,7 @@ test('zipToFileFragments', async (t) => {
 
 test('zipToS3File', async (t) => {
   await t.test('uploads the zip inside the folder when no path is given', async () => {
-    const { zipper, uploads } = makeZipper(SAMPLE, { tmpDir: tmpDir() });
+    const { zipper, uploads } = makeZipper();
     const result = await zipper.zipToS3File({ s3FolderName: 'photos', s3ZipFileName: 'all.zip' });
 
     assert.equal(uploads.length, 1);
@@ -344,27 +344,59 @@ test('zipToS3File', async (t) => {
 
     const entries = await readZip(uploads[0].body);
     assert.deepEqual(Object.keys(entries).sort(), ['a.txt', 'b.txt', 'c.tmp']);
-    assert.deepEqual(fs.readdirSync(zipper.tmpDir), [], 'temp file cleaned up');
+  });
+
+  await t.test('streams without touching the filesystem', async () => {
+    const { zipper, uploads } = makeZipper();
+    const openSync = fs.openSync;
+    const createWriteStream = fs.createWriteStream;
+    let fsWrites = 0;
+    fs.openSync = (...a) => { fsWrites += 1; return openSync(...a); };
+    fs.createWriteStream = (...a) => { fsWrites += 1; return createWriteStream(...a); };
+    try {
+      await zipper.zipToS3File({ s3FolderName: 'photos', s3ZipFileName: 'all.zip', recursive: true });
+    } finally {
+      fs.openSync = openSync;
+      fs.createWriteStream = createWriteStream;
+    }
+    assert.equal(fsWrites, 0);
+    assert.equal(uploads.length, 1);
+  });
+
+  await t.test('rejects and stops when the upload fails', async () => {
+    const { zipper, mock } = makeZipper();
+    const { PutObjectCommand } = require('@aws-sdk/client-s3');
+    mock.on(PutObjectCommand).rejects(new Error('upload exploded'));
+    await assert.rejects(
+      zipper.zipToS3File({ s3FolderName: 'photos', s3ZipFileName: 'all.zip' }),
+      /upload exploded/,
+    );
   });
 
   await t.test('uses the full key when a path is given', async () => {
-    const { zipper, uploads } = makeZipper(SAMPLE, { tmpDir: tmpDir() });
+    const { zipper, uploads } = makeZipper();
     await zipper.zipToS3File({ s3FolderName: 'photos', s3ZipFileName: 'archive/x.zip' });
     assert.equal(uploads[0].Key, 'archive/x.zip');
   });
 
   await t.test('skips the upload when nothing was zipped', async () => {
-    const { zipper, uploads } = makeZipper(SAMPLE, { tmpDir: tmpDir() });
+    const { zipper, uploads } = makeZipper();
     const result = await zipper.zipToS3File({ s3FolderName: 'empty', s3ZipFileName: 'x.zip' });
     assert.equal(uploads.length, 0);
-    assert.deepEqual(result, { zipFileETag: null, zipFileLocation: null, zippedFiles: [] });
-    assert.deepEqual(fs.readdirSync(zipper.tmpDir), []);
+    assert.deepEqual(result, {
+      zipFileETag: null,
+      zipFileLocation: null,
+      zipFileKey: null,
+      zippedFiles: [],
+      totalFilesScanned: 0,
+      lastScannedFile: undefined,
+    });
   });
 });
 
 test('zipToS3FileFragments', async (t) => {
   await t.test('uploads each fragment with an index suffix and cleans up', async () => {
-    const { zipper, uploads } = makeZipper(SAMPLE, { tmpDir: tmpDir() });
+    const { zipper, uploads } = makeZipper();
     const results = await zipper.zipToS3FileFragments({
       s3FolderName: 'photos',
       s3ZipFileName: 'frag.zip',
@@ -374,10 +406,31 @@ test('zipToS3FileFragments', async (t) => {
 
     const expected = ['photos/frag_1.zip', 'photos/frag_2.zip', 'photos/frag_3.zip'];
     assert.deepEqual(uploads.map((u) => u.Key), expected);
-    assert.deepEqual(results.map((r) => r.s3Key), expected);
-    assert.ok(results.every((r) => r.uploadedFile.ETag));
-    assert.deepEqual(fs.readdirSync(zipper.tmpDir), [], 'temp fragments cleaned up');
+    assert.deepEqual(results.map((r) => r.zipFileKey), expected);
+    assert.ok(results.every((r) => r.zipFileETag));
+    assert.deepEqual(results.map((r) => r.zippedFiles.length), [1, 2, 1]);
   });
+});
+
+test('uploadLocalFileToS3 uploads an existing file', async () => {
+  const { zipper, uploads } = makeZipper();
+  const file = path.join(tmpDir(), 'x.zip');
+  fs.writeFileSync(file, 'zipbytes');
+  const result = await zipper.uploadLocalFileToS3(file, 'dest/x.zip');
+  assert.equal(result.ETag, '"etag-1"');
+  assert.equal(uploads[0].Key, 'dest/x.zip');
+  assert.equal(uploads[0].body.toString(), 'zipbytes');
+});
+
+test('streamZipDataTo with createPipe never creates the pipe for an empty folder', async () => {
+  const { zipper } = makeZipper();
+  let created = 0;
+  const result = await zipper.streamZipDataTo({
+    folderName: 'nothing',
+    createPipe: () => { created += 1; return collector(); },
+  });
+  assert.equal(created, 0);
+  assert.deepEqual(result.zippedFiles, []);
 });
 
 test('logger receives progress messages', async () => {
@@ -388,7 +441,7 @@ test('logger receives progress messages', async () => {
     warn: (...a) => messages.push(['warn', ...a]),
     error: (...a) => messages.push(['error', ...a]),
   };
-  const { zipper } = makeZipper(SAMPLE, { logger, tmpDir: tmpDir() });
+  const { zipper } = makeZipper(SAMPLE, { logger });
   await zipper.zipToS3File({ s3FolderName: 'photos', s3ZipFileName: 'x.zip' });
   assert.ok(messages.some(([level, msg]) => level === 'debug' && msg === 'zipping'));
   assert.ok(messages.some(([level, msg]) => level === 'info' && msg === 'upload completed'));

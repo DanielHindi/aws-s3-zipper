@@ -1,10 +1,9 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { once } = require('node:events');
+const { PassThrough } = require('node:stream');
 const archiver = require('archiver');
 const {
   S3Client,
@@ -76,7 +75,8 @@ class S3Zipper {
    * @param {S3Client} [options.s3Client]      Bring your own client (also used for testing).
    * @param {number} [options.concurrency=10]  Parallel GetObject requests while zipping.
    * @param {number} [options.pageSize=1000]   Objects per ListObjectsV2 page (max 1000).
-   * @param {string} [options.tmpDir]          Where temp zips are written. Defaults to os.tmpdir().
+   * @param {object} [options.uploadOptions]   Extra options for @aws-sdk/lib-storage Upload
+   *                                           (partSize, queueSize, tags, ...).
    * @param {object} [options.logger]          Object with debug/info/warn/error. Silent by default.
    */
   constructor(options) {
@@ -91,7 +91,7 @@ class S3Zipper {
     this.logger = options.logger || noopLogger;
     this.concurrency = Math.max(1, options.concurrency ?? 10);
     this.pageSize = Math.min(1000, Math.max(1, options.pageSize ?? 1000));
-    this.tmpDir = options.tmpDir || os.tmpdir();
+    this.uploadOptions = options.uploadOptions || {};
     this.s3 = options.s3Client || new S3Client(buildClientConfig(options));
   }
 
@@ -184,28 +184,48 @@ class S3Zipper {
    * Stream a zip of the folder into `params.pipe` (any Writable, e.g. an HTTP
    * response). Resolves once the archive has been fully written to the pipe.
    *
+   * Alternatively pass `params.createPipe`, a function returning a Writable
+   * that is only invoked when the first entry is about to be written. If the
+   * folder yields no entries the function is never called and nothing is
+   * written anywhere.
+   *
    * @returns {Promise<{zip: import('archiver').Archiver, zippedFiles: object[], totalFilesScanned: number, lastScannedFile: object|undefined}>}
    */
   async streamZipDataTo(params) {
     if (!params || params.folderName === undefined) {
       throw new TypeError('S3Zipper.streamZipDataTo: "folderName" is required (use "" for the bucket root)');
     }
+    if (params.pipe && params.createPipe) {
+      throw new TypeError('S3Zipper.streamZipDataTo: pass either "pipe" or "createPipe", not both');
+    }
 
     const prefix = toPrefix(params.folderName);
     const stats = { totalFilesScanned: 0, lastScannedFile: undefined };
 
     const archive = archiver('zip', params.archiverOptions);
-    const failure = new Promise((_, reject) => archive.once('error', reject));
     archive.on('warning', (warning) => this.logger.warn('archiver warning', warning));
 
-    if (params.pipe) {
-      archive.pipe(params.pipe);
+    let failed;
+    const failure = new Promise((_, reject) => {
+      failed = (err) => {
+        if (!archive._state?.finalized) archive.abort();
+        reject(err);
+      };
+      archive.once('error', failed);
+    });
+
+    let pipe = null;
+    const attach = (dest) => {
+      pipe = dest;
+      archive.pipe(dest);
+      dest.once('error', failed);
       // If the consumer goes away (e.g. HTTP client disconnects) stop pulling
       // objects from S3 instead of buffering them in memory.
-      params.pipe.once('close', () => {
-        if (!archive._state?.finalized) archive.abort();
+      dest.once('close', () => {
+        if (!archive._state?.finalized) failed(Object.assign(new Error('Destination closed before the archive was finished'), { code: 'ERR_DESTINATION_CLOSED' }));
       });
-    }
+    };
+    if (params.pipe) attach(params.pipe);
 
     const zippedFiles = [];
 
@@ -228,6 +248,7 @@ class S3Zipper {
     const drainOne = async () => {
       const { file, name, body } = await inFlight.shift();
       if (!name) return;
+      if (!pipe && params.createPipe) attach(await params.createPipe());
       this.logger.debug('zipping', { key: file.Key, name });
       const entryDone = once(archive, 'entry');
       archive.append(body, { name, date: file.LastModified });
@@ -242,6 +263,12 @@ class S3Zipper {
           if (inFlight.length >= this.concurrency) await drainOne();
         }
         while (inFlight.length > 0) await drainOne();
+
+        if (!pipe && params.createPipe) {
+          // Nothing was appended, so no destination was ever created.
+          archive.abort();
+          return;
+        }
         await archive.finalize();
       } catch (err) {
         // Release any responses we never got to append.
@@ -251,6 +278,7 @@ class S3Zipper {
         throw err;
       }
     })();
+    work.catch(() => {});
 
     await Promise.race([work, failure]);
 
@@ -273,25 +301,11 @@ class S3Zipper {
     }
     const fileStream = fs.createWriteStream(params.zipFileName);
     const closed = once(fileStream, 'close');
-    const streamError = new Promise((_, reject) => fileStream.once('error', reject));
-    // Both settle on 'error'; whichever is not currently awaited must not surface as unhandled.
     closed.catch(() => {});
-    streamError.catch(() => {});
 
     try {
-      const result = await Promise.race([
-        this.streamZipDataTo({
-          pipe: fileStream,
-          folderName: params.s3FolderName,
-          startKey: params.startKey,
-          maxFileCount: params.maxFileCount,
-          maxFileSize: params.maxFileSize,
-          recursive: params.recursive,
-          archiverOptions: params.archiverOptions,
-        }),
-        streamError,
-      ]);
-      await Promise.race([closed, streamError]);
+      const result = await this.streamZipDataTo({ ...this._listParams(params), pipe: fileStream });
+      await closed;
       return { ...result, zipFileName: params.zipFileName };
     } catch (err) {
       fileStream.destroy();
@@ -313,55 +327,91 @@ class S3Zipper {
     if (!params?.zipFileName) {
       throw new TypeError('S3Zipper.zipToFileFragments: "zipFileName" is required');
     }
-    if (params.maxFileSize && params.maxFileSize < 1024) {
-      this.logger.warn('maxFileSize is very low; fragments may be empty', { maxFileSize: params.maxFileSize });
-    }
-
+    this._warnLowMaxFileSize(params);
     const baseName = ensureZipExtension(params.zipFileName);
-    const results = [];
-    let startKey = params.startKey;
 
-    for (;;) {
-      const fragFileName = fragmentName(baseName, results.length + 1);
-      const result = await this.zipToFile({ ...params, startKey, zipFileName: fragFileName });
+    return this._fragmentLoop(params, async (startKey, number) => {
+      const zipFileName = fragmentName(baseName, number);
+      const result = await this.zipToFile({ ...params, startKey, zipFileName });
+      if (result.zippedFiles.length === 0) await fs.promises.rm(zipFileName, { force: true });
+      return result;
+    });
+  }
 
-      if (result.zippedFiles.length > 0) {
-        results.push(result);
-        if (params.onFragment) await params.onFragment(result, results.length - 1);
-      } else {
-        await fs.promises.rm(fragFileName, { force: true });
-      }
+  /**
+   * Zip a folder and upload the zip to S3 as a multipart upload, streaming
+   * straight from the archiver with no temporary file. When s3ZipFileName has
+   * no path it is placed inside s3FolderName. If the folder yields no entries
+   * nothing is uploaded.
+   */
+  async zipToS3File(params) {
+    if (!params?.s3ZipFileName) {
+      throw new TypeError('S3Zipper.zipToS3File: "s3ZipFileName" is required');
+    }
+    const s3Key = this._resolveS3ZipKey(params);
 
-      if (result.totalFilesScanned === 0 || !result.lastScannedFile) break;
-      startKey = result.lastScannedFile.Key;
+    let uploadDone = null;
+    const result = await this.streamZipDataTo({
+      ...this._listParams(params),
+      createPipe: () => {
+        const pass = new PassThrough();
+        const upload = this._createUpload(pass, s3Key, params.contentType);
+        uploadDone = upload.done();
+        // If the upload fails, tear down the pipe so the archive stops.
+        uploadDone.catch((err) => pass.destroy(err));
+        return pass;
+      },
+    });
+
+    if (!uploadDone) {
+      this.logger.info('no files zipped, nothing to upload', { key: s3Key });
+      return {
+        zipFileETag: null,
+        zipFileLocation: null,
+        zipFileKey: null,
+        zippedFiles: [],
+        totalFilesScanned: result.totalFilesScanned,
+        lastScannedFile: result.lastScannedFile,
+      };
     }
 
-    return results;
+    const upload = await uploadDone;
+    this.logger.info('upload completed', { key: s3Key });
+    return {
+      zipFileETag: upload.ETag ?? null,
+      zipFileLocation: upload.Location ?? null,
+      zipFileKey: s3Key,
+      zippedFiles: result.zippedFiles,
+      totalFilesScanned: result.totalFilesScanned,
+      lastScannedFile: result.lastScannedFile,
+    };
+  }
+
+  /**
+   * Zip a folder into fragments and upload each one to S3, streaming.
+   * Uploaded keys are numbered from 1 with `_<n>` appended before the extension.
+   *
+   * @returns {Promise<object[]>} one result per uploaded fragment.
+   */
+  async zipToS3FileFragments(params) {
+    if (!params?.s3ZipFileName) {
+      throw new TypeError('S3Zipper.zipToS3FileFragments: "s3ZipFileName" is required');
+    }
+    this._warnLowMaxFileSize(params);
+    const baseKey = ensureZipExtension(this._resolveS3ZipKey(params));
+
+    return this._fragmentLoop(params, (startKey, number) =>
+      this.zipToS3File({ ...params, startKey, s3ZipFileName: fragmentName(baseKey, number) }),
+    );
   }
 
   /**
    * Upload a local file to S3 with multipart support.
    */
   async uploadLocalFileToS3(localFileName, s3Key, { contentType = 'application/zip' } = {}) {
-    this.logger.info('uploading', { key: s3Key });
     const body = fs.createReadStream(localFileName);
-    const upload = new Upload({
-      client: this.s3,
-      params: { Bucket: this.bucket, Key: s3Key, ContentType: contentType, Body: body },
-    });
-
-    let lastReported = -1;
-    upload.on('httpUploadProgress', (progress) => {
-      if (!progress.total) return;
-      const pct = Math.floor((progress.loaded / progress.total) * 10) * 10;
-      if (pct > lastReported) {
-        lastReported = pct;
-        this.logger.info('upload progress', { key: s3Key, percent: pct });
-      }
-    });
-
     try {
-      const result = await upload.done();
+      const result = await this._createUpload(body, s3Key, contentType).done();
       this.logger.info('upload completed', { key: s3Key });
       return result;
     } finally {
@@ -369,72 +419,71 @@ class S3Zipper {
     }
   }
 
-  /**
-   * Zip a folder and upload the zip back to S3. When s3ZipFileName has no
-   * path it is placed inside s3FolderName.
-   */
-  async zipToS3File(params) {
-    if (!params?.s3ZipFileName) {
-      throw new TypeError('S3Zipper.zipToS3File: "s3ZipFileName" is required');
-    }
-    const s3Key = this._resolveS3ZipKey(params);
-    const tmpFile = this._tempZipPath(params.tmpDir);
+  _createUpload(body, s3Key, contentType = 'application/zip') {
+    this.logger.info('uploading', { key: s3Key });
+    const upload = new Upload({
+      client: this.s3,
+      ...this.uploadOptions,
+      params: { Bucket: this.bucket, Key: s3Key, ContentType: contentType, Body: body },
+    });
 
-    try {
-      const result = await this.zipToFile({ ...params, zipFileName: tmpFile });
-      if (result.zippedFiles.length === 0) {
-        this.logger.info('no files zipped, nothing to upload');
-        return { zipFileETag: null, zipFileLocation: null, zippedFiles: [] };
+    let lastReported = -1;
+    upload.on('httpUploadProgress', (progress) => {
+      if (progress.total) {
+        const pct = Math.floor((progress.loaded / progress.total) * 10) * 10;
+        if (pct > lastReported) {
+          lastReported = pct;
+          this.logger.info('upload progress', { key: s3Key, percent: pct });
+        }
+      } else {
+        this.logger.debug('upload progress', { key: s3Key, loaded: progress.loaded, part: progress.part });
       }
-      const upload = await this.uploadLocalFileToS3(tmpFile, s3Key);
-      return {
-        zipFileETag: upload.ETag ?? null,
-        zipFileLocation: upload.Location ?? null,
-        zipFileKey: s3Key,
-        zippedFiles: result.zippedFiles,
-      };
-    } finally {
-      await fs.promises.rm(tmpFile, { force: true });
-    }
+    });
+    return upload;
   }
 
   /**
-   * Zip a folder into fragments and upload each fragment to S3.
-   * Uploaded keys are numbered from 1 with `_<n>` appended before the extension.
-   *
-   * @returns {Promise<object[]>} fragment results, each with `uploadedFile`.
+   * Shared driver for the fragment methods: run one fragment at a time from
+   * `startKey`, keep the non-empty ones, and stop when a pass scans nothing.
    */
-  async zipToS3FileFragments(params) {
-    if (!params?.s3ZipFileName) {
-      throw new TypeError('S3Zipper.zipToS3FileFragments: "s3ZipFileName" is required');
-    }
-    const s3Key = ensureZipExtension(this._resolveS3ZipKey(params));
-    const tmpBase = this._tempZipPath(params.tmpDir);
+  async _fragmentLoop(params, runFragment) {
+    const results = [];
+    let startKey = params.startKey;
 
-    return this.zipToFileFragments({
-      ...params,
-      zipFileName: tmpBase,
-      onFragment: async (result, index) => {
-        const fragKey = fragmentName(s3Key, index + 1);
-        try {
-          result.uploadedFile = await this.uploadLocalFileToS3(result.zipFileName, fragKey);
-          result.s3Key = fragKey;
-        } finally {
-          await fs.promises.rm(result.zipFileName, { force: true });
-        }
-        if (params.onFragment) await params.onFragment(result, index);
-      },
-    });
+    for (;;) {
+      const result = await runFragment(startKey, results.length + 1);
+      if (result.zippedFiles.length > 0) {
+        results.push(result);
+        if (params.onFragment) await params.onFragment(result, results.length - 1);
+      }
+      if (result.totalFilesScanned === 0 || !result.lastScannedFile) break;
+      startKey = result.lastScannedFile.Key;
+    }
+
+    return results;
+  }
+
+  _listParams(params) {
+    return {
+      folderName: params.s3FolderName,
+      startKey: params.startKey,
+      maxFileCount: params.maxFileCount,
+      maxFileSize: params.maxFileSize,
+      recursive: params.recursive,
+      archiverOptions: params.archiverOptions,
+    };
+  }
+
+  _warnLowMaxFileSize(params) {
+    if (params.maxFileSize && params.maxFileSize < 1024) {
+      this.logger.warn('maxFileSize is very low; fragments may be empty', { maxFileSize: params.maxFileSize });
+    }
   }
 
   _resolveS3ZipKey(params) {
     return params.s3ZipFileName.includes('/')
       ? params.s3ZipFileName
       : `${toPrefix(params.s3FolderName)}${params.s3ZipFileName}`;
-  }
-
-  _tempZipPath(tmpDir) {
-    return path.join(tmpDir || this.tmpDir, `aws-s3-zipper-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.zip`);
   }
 }
 

@@ -11,7 +11,10 @@ Full rewrite on AWS SDK v3 with a Promise-based API. See the README's "Migrating
 - `logger` option; the library is silent by default. Closes #55.
 - `concurrency` option for bounded parallel object fetches. Supersedes PR #38.
 - Bucket-root zipping with `folderName: ''`. Closes #33.
-- `tmpDir` constructor option defaulting to `os.tmpdir()`, so Lambda works out of the box. Closes PR #8, PR #25.
+- S3 methods stream the archive directly into a multipart upload; no temp files, so Lambda works out of the box. Closes PR #8, PR #25.
+- `scanFiles()` async generator; listing is lazy and stops paginating at the batch cut-off. `pageSize` option.
+- Object fetches use a sliding window of `concurrency` with per-entry back-pressure, so memory stays bounded.
+- `uploadOptions` passthrough to `@aws-sdk/lib-storage`.
 - `onFragment` hook for fragment methods.
 - TypeScript definitions. Closes #37, #49.
 - Test suite (`node --test` with mocked S3), ESLint, GitHub Actions CI.
@@ -19,9 +22,8 @@ Full rewrite on AWS SDK v3 with a Promise-based API. See the README's "Migrating
 ### Changed
 - Objects are streamed into the archive instead of buffered in memory; aborting the destination stream aborts the archive. Addresses #57, #24, #26.
 - Archiver upgraded from 0.21 to 7.x, fixing corrupted zips with many small files. Closes #39.
-- Multipart uploads via `@aws-sdk/lib-storage`; upload progress logs once per 10% step. Supersedes PR #40.
+- Multipart uploads via `@aws-sdk/lib-storage`; upload progress logs once per 10% step when the size is known. Supersedes PR #40.
 - Stream completion is awaited properly; the 1-second `setTimeout` hacks are gone.
-- Temp files are removed even when zipping or uploading fails.
 - Fragment numbering is 1-based for both local and S3 fragments.
 
 ### Removed

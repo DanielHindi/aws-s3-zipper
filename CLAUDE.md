@@ -30,20 +30,22 @@ streamZipDataTo          consumes scanFiles through a sliding window of `concurr
    v
 zipToFile                wraps streamZipDataTo with an fs write stream, awaits 'close'
    |
-   +--> zipToFileFragments   loops zipToFile from lastScannedFile.Key until a pass scans 0
-   |                          objects; awaits params.onFragment per non-empty fragment
+   +--> zipToS3File          streamZipDataTo with createPipe -> PassThrough -> lib-storage Upload;
+   |                         no temp file; createPipe is only called on the first entry so an
+   |                         empty folder uploads nothing
    |
-   +--> zipToS3File          zipToFile to a temp file, uploadLocalFileToS3, rm in finally
-   |
-   +--> zipToS3FileFragments zipToFileFragments with an onFragment that uploads and removes
-                             each fragment
+   +--> zipToFileFragments / zipToS3FileFragments
+                             both go through _fragmentLoop(): run one fragment from startKey,
+                             keep non-empty ones, resume from lastScannedFile.Key until a pass
+                             scans 0 objects; awaits params.onFragment per kept fragment
 ```
 
 Invariants that are easy to break:
 
 - **Differential zipping** relies on `startKey` → `StartAfter` and on every result carrying `lastScannedFile` and `zippedFiles[].Key` so callers can resume.
 - **Fragment rules** in `scanFiles`: an object larger than `maxFileSize` is zipped alone only when it is first in the batch; otherwise the batch ends before it. `totalFilesScanned` must include filtered-out objects, since the fragment loop stops only when it is 0.
-- **Folder placeholders** (keys ending in `/`) are scanned and counted but never appended. A fragment containing only a placeholder is empty, gets deleted, and does not consume a fragment number.
+- **Folder placeholders** (keys ending in `/`) are scanned and counted but never appended. A fragment containing only a placeholder is empty, gets deleted (local) or never uploaded (S3), and does not consume a fragment number.
+- **No local disk in the S3 path.** `zipToS3File` must keep working on read-only filesystems; there is a test that asserts no `fs` writes happen.
 - **`filterOutFiles(file)` and `calculateFileName(file, { prefix, folderName })`** are public override points documented in the README. Keep their signatures.
 - **Prefix handling** goes through `toPrefix()`: `''` means the bucket root, leading/trailing slashes are stripped.
 - **No buffering**: `GetObject` bodies are passed to archiver as streams. Do not read them into memory.
