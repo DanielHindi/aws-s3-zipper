@@ -219,26 +219,37 @@ class S3Zipper {
       return { file, name, body: Body };
     };
 
-    const appendBatch = async (batch) => {
-      for (const { file, name, body } of await Promise.all(batch)) {
-        if (!name) continue;
-        this.logger.debug('zipping', { key: file.Key, name });
-        archive.append(body, { name, date: file.LastModified });
-        zippedFiles.push(file);
-      }
+    // Sliding window: at most `concurrency` GetObject responses are open at
+    // once, and the next object is only fetched after archiver has finished
+    // consuming the oldest one. Memory therefore stays bounded by
+    // `concurrency` in-flight streams rather than a whole batch of bodies.
+    const inFlight = [];
+
+    const drainOne = async () => {
+      const { file, name, body } = await inFlight.shift();
+      if (!name) return;
+      this.logger.debug('zipping', { key: file.Key, name });
+      const entryDone = once(archive, 'entry');
+      archive.append(body, { name, date: file.LastModified });
+      zippedFiles.push(file);
+      await entryDone;
     };
 
     const work = (async () => {
-      let batch = [];
-      for await (const file of this.scanFiles(params, stats)) {
-        batch.push(fetchEntry(file));
-        if (batch.length >= this.concurrency) {
-          await appendBatch(batch);
-          batch = [];
+      try {
+        for await (const file of this.scanFiles(params, stats)) {
+          inFlight.push(fetchEntry(file));
+          if (inFlight.length >= this.concurrency) await drainOne();
         }
+        while (inFlight.length > 0) await drainOne();
+        await archive.finalize();
+      } catch (err) {
+        // Release any responses we never got to append.
+        for (const pending of inFlight) {
+          pending.then(({ body }) => body?.destroy?.(), () => {});
+        }
+        throw err;
       }
-      await appendBatch(batch);
-      await archive.finalize();
     })();
 
     await Promise.race([work, failure]);

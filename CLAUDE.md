@@ -24,8 +24,9 @@ scanFiles (generator)    paginateListObjectsV2 (StartAfter=startKey, Delimiter='
    |                     applies filterOutFiles, enforces maxFileCount / maxFileSize cut-offs,
    |                     yields lazily and mutates a `stats` object; getFiles() just collects it
    v
-streamZipDataTo          consumes scanFiles, GetObject in batches of `concurrency`,
-   |                     archive.append(stream) in order, pipes to params.pipe, awaits finalize()
+streamZipDataTo          consumes scanFiles through a sliding window of `concurrency` GetObject
+   |                     requests; appends one entry at a time and waits for archiver's 'entry'
+   |                     event before fetching the next; pipes to params.pipe, awaits finalize()
    v
 zipToFile                wraps streamZipDataTo with an fs write stream, awaits 'close'
    |

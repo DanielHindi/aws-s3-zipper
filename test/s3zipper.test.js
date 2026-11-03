@@ -199,6 +199,34 @@ test('streamZipDataTo', async (t) => {
     await assert.rejects(zipper.streamZipDataTo({ pipe: out, folderName: 'photos' }), /boom/);
   });
 
+  await t.test('keeps at most `concurrency` object bodies open while zipping', async () => {
+    const { zipper, mock } = makeZipper(SAMPLE, { concurrency: 2 });
+    const { GetObjectCommand } = require('@aws-sdk/client-s3');
+    const { Readable } = require('node:stream');
+    let open = 0;
+    let peak = 0;
+    mock.on(GetObjectCommand).callsFake((input) => {
+      open += 1;
+      peak = Math.max(peak, open);
+      const body = new Readable({
+        read() {
+          // Deliver slowly so several bodies would overlap if fetched eagerly.
+          setTimeout(() => {
+            this.push(Buffer.from(SAMPLE[input.Key]));
+            this.push(null);
+          }, 5);
+        },
+      });
+      body.once('end', () => { open -= 1; });
+      return { Body: body };
+    });
+    const out = collector();
+    await zipper.streamZipDataTo({ pipe: out, folderName: 'photos', recursive: true });
+    assert.ok(peak <= 2, `peak open bodies was ${peak}`);
+    const entries = await readZip(out.buffer());
+    assert.equal(Object.keys(entries).length, 4);
+  });
+
   await t.test('respects the concurrency setting', async () => {
     const { zipper, mock } = makeZipper(SAMPLE, { concurrency: 2 });
     const { GetObjectCommand } = require('@aws-sdk/client-s3');
