@@ -21,6 +21,7 @@ Full rewrite on AWS SDK v3 with a Promise-based API. See the README's "Migrating
 - Test suite (`node --test` with mocked S3), ESLint, GitHub Actions CI.
 
 ### Changed
+- One flat set of parameter names everywhere: `prefix`, `filePath`, `key`. The 1.x names (`folderName`, `s3FolderName`, `zipFileName`, `s3ZipFileName`) are accepted as aliases. S3 results use `key`, `etag`, `location`.
 - Objects are streamed into the archive instead of buffered in memory; aborting the destination stream aborts the archive. Addresses #57, #24, #26.
 - Archiver upgraded from 0.21 to 7.x, fixing corrupted zips with many small files. Closes #39.
 - Multipart uploads via `@aws-sdk/lib-storage`; upload progress logs once per 10% step when the size is known. Supersedes PR #40.

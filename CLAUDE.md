@@ -46,7 +46,8 @@ Invariants that are easy to break:
 - **Fragment rules** in `scanFiles`: an object larger than `maxFileSize` is zipped alone only when it is first in the batch; otherwise the batch ends before it. `totalFilesScanned` must include filtered-out objects, since the fragment loop stops only when it is 0.
 - **Folder placeholders** (keys ending in `/`) are scanned and counted but never appended. A fragment containing only a placeholder is empty, gets deleted (local) or never uploaded (S3), and does not consume a fragment number.
 - **No local disk in the S3 path.** `zipToS3File` must keep working on read-only filesystems; there is a test that asserts no `fs` writes happen.
-- **`filterOutFiles(file)` and `calculateFileName(file, { prefix, folderName })`** are public override points documented in the README. Keep their signatures.
+- **`filterOutFiles(file)` and `calculateFileName(file, { prefix })`** are public override points documented in the README. Keep their signatures.
+- **Param names** are `prefix`, `filePath`, `key` throughout. Every public method runs `normalizeParams()` first, which maps the 1.x aliases (`folderName`, `s3FolderName`, `zipFileName`, `s3ZipFileName`) onto them; internal code must only read the canonical names.
 - **Prefix handling** goes through `toPrefix()`: `''` means the bucket root, leading/trailing slashes are stripped.
 - **No buffering**: `GetObject` bodies are passed to archiver as streams. Do not read them into memory.
 - **Logging** only via `this.logger` (silent by default). No `console.*` in library code.

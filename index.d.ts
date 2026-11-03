@@ -34,8 +34,8 @@ export interface S3ZipperOptions {
 export type S3File = _Object & { Key: string };
 
 export interface ListParams {
-  /** Folder inside the bucket. Use "" for the bucket root. */
-  folderName: string;
+  /** Prefix ("folder") inside the bucket. Use "" for the whole bucket. */
+  prefix: string;
   /** Resume listing after this key. */
   startKey?: string;
   maxFileCount?: number;
@@ -70,42 +70,32 @@ export interface StreamResult {
   lastScannedFile?: S3File;
 }
 
-export interface ZipToFileParams {
-  s3FolderName: string;
-  zipFileName: string;
-  startKey?: string;
-  maxFileCount?: number;
-  maxFileSize?: number;
-  recursive?: boolean;
-  signal?: AbortSignal;
+export interface ZipToFileParams extends ListParams {
+  /** Local path of the zip to write. */
+  filePath: string;
   archiverOptions?: ArchiverOptions;
 }
 
 export interface ZipToFileResult extends StreamResult {
-  zipFileName: string;
+  filePath: string;
 }
 
 export interface ZipToFileFragmentsParams extends ZipToFileParams {
   onFragment?: (result: ZipToFileResult, index: number) => void | Promise<void>;
 }
 
-export interface ZipToS3FileParams {
-  s3FolderName: string;
-  /** Key for the zip. Without a "/" it is placed inside s3FolderName. */
-  s3ZipFileName: string;
-  startKey?: string;
-  maxFileCount?: number;
-  maxFileSize?: number;
-  recursive?: boolean;
-  signal?: AbortSignal;
+export interface ZipToS3FileParams extends ListParams {
+  /** Key for the zip. Without a "/" it is placed inside `prefix`. */
+  key: string;
   contentType?: string;
   archiverOptions?: ArchiverOptions;
 }
 
 export interface ZipToS3FileResult extends ScanStats {
-  zipFileETag: string | null;
-  zipFileLocation: string | null;
-  zipFileKey: string | null;
+  /** null when nothing was zipped and therefore nothing uploaded. */
+  key: string | null;
+  etag: string | null;
+  location: string | null;
   zippedFiles: S3File[];
 }
 
@@ -126,7 +116,7 @@ declare class S3Zipper {
   /** Override to exclude objects; return a falsy value to skip. */
   filterOutFiles(file: S3File): S3File | null | undefined | false;
   /** Override to control the entry name inside the zip. */
-  calculateFileName(file: S3File, context: { prefix: string; folderName: string }): string;
+  calculateFileName(file: S3File, context: { prefix: string }): string;
 
   /** Lazily yields objects that pass filterOutFiles; `stats` is updated as the scan proceeds. */
   scanFiles(params: ListParams, stats?: ScanStats): AsyncGenerator<S3File, void, undefined>;
@@ -136,7 +126,7 @@ declare class S3Zipper {
   zipToFileFragments(params: ZipToFileFragmentsParams): Promise<ZipToFileResult[]>;
   uploadLocalFileToS3(
     localFileName: string,
-    s3Key: string,
+    key: string,
     options?: { contentType?: string; signal?: AbortSignal },
   ): Promise<CompleteMultipartUploadCommandOutput>;
   zipToS3File(params: ZipToS3FileParams): Promise<ZipToS3FileResult>;

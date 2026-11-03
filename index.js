@@ -57,6 +57,29 @@ function fragmentName(fileName, index) {
   return `${base}_${index}${ext || '.zip'}`;
 }
 
+const LEGACY_PARAM_NAMES = {
+  folderName: 'prefix',
+  s3FolderName: 'prefix',
+  zipFileName: 'filePath',
+  s3ZipFileName: 'key',
+};
+
+/**
+ * Accept the 1.x parameter names as aliases of the flat 2.x names.
+ * Returns a shallow copy with only the canonical names set.
+ */
+function normalizeParams(params) {
+  if (!params || typeof params !== 'object') return params;
+  const out = { ...params };
+  for (const [legacy, canonical] of Object.entries(LEGACY_PARAM_NAMES)) {
+    if (legacy in out) {
+      if (out[canonical] === undefined) out[canonical] = out[legacy];
+      delete out[legacy];
+    }
+  }
+  return out;
+}
+
 /** The error to reject with when `signal` has been aborted. */
 function abortReason(signal) {
   return signal?.reason ?? new DOMException('The operation was aborted', 'AbortError');
@@ -110,15 +133,15 @@ class S3Zipper {
 
   /**
    * Override to control the entry name inside the zip.
-   * Default: the key relative to the zipped folder (an empty string marks a
-   * folder placeholder object and is skipped).
+   * Default: the key relative to the zipped prefix. Return an empty string
+   * to skip the object.
    */
   calculateFileName(file, { prefix }) {
     return file.Key.startsWith(prefix) ? file.Key.slice(prefix.length) : file.Key;
   }
 
   /**
-   * Lazily scan objects under a folder, page by page, applying
+   * Lazily scan objects under a prefix, page by page, applying
    * filterOutFiles and the maxFileCount / maxFileSize batching rules.
    * Yields only objects that passed the filter. `stats` is updated as the
    * scan progresses so the consumer can report totalFilesScanned and
@@ -128,8 +151,9 @@ class S3Zipper {
    * @param {{totalFilesScanned: number, lastScannedFile?: object}} stats
    */
   async *scanFiles(params = {}, stats = { totalFilesScanned: 0, lastScannedFile: undefined }) {
+    params = normalizeParams(params);
     const { startKey, maxFileCount, maxFileSize, recursive = false, signal } = params;
-    const prefix = toPrefix(params.folderName);
+    const prefix = toPrefix(params.prefix);
 
     const input = { Bucket: this.bucket, Prefix: prefix };
     if (startKey) input.StartAfter = startKey;
@@ -172,7 +196,7 @@ class S3Zipper {
   }
 
   /**
-   * List objects under a folder, applying filterOutFiles and the
+   * List objects under a prefix, applying filterOutFiles and the
    * maxFileCount / maxFileSize batching rules. Convenience wrapper around
    * scanFiles that collects the batch into an array.
    *
@@ -186,19 +210,20 @@ class S3Zipper {
   }
 
   /**
-   * Stream a zip of the folder into `params.pipe` (any Writable, e.g. an HTTP
+   * Stream a zip of the prefix into `params.pipe` (any Writable, e.g. an HTTP
    * response). Resolves once the archive has been fully written to the pipe.
    *
    * Alternatively pass `params.createPipe`, a function returning a Writable
    * that is only invoked when the first entry is about to be written. If the
-   * folder yields no entries the function is never called and nothing is
+   * prefix yields no entries the function is never called and nothing is
    * written anywhere.
    *
    * @returns {Promise<{zip: import('archiver').Archiver, zippedFiles: object[], totalFilesScanned: number, lastScannedFile: object|undefined}>}
    */
   async streamZipDataTo(params) {
-    if (!params || params.folderName === undefined) {
-      throw new TypeError('S3Zipper.streamZipDataTo: "folderName" is required (use "" for the bucket root)');
+    params = normalizeParams(params);
+    if (!params || params.prefix === undefined) {
+      throw new TypeError('S3Zipper.streamZipDataTo: "prefix" is required (use "" for the bucket root)');
     }
     if (params.pipe && params.createPipe) {
       throw new TypeError('S3Zipper.streamZipDataTo: pass either "pipe" or "createPipe", not both');
@@ -207,7 +232,7 @@ class S3Zipper {
     const { signal } = params;
     signal?.throwIfAborted();
 
-    const prefix = toPrefix(params.folderName);
+    const prefix = toPrefix(params.prefix);
     const stats = { totalFilesScanned: 0, lastScannedFile: undefined };
 
     const archive = archiver('zip', params.archiverOptions);
@@ -241,7 +266,7 @@ class S3Zipper {
 
     const fetchEntry = async (file) => {
       if (file.Key.endsWith('/')) return { file, name: null, body: null }; // folder placeholder
-      const name = this.calculateFileName(file, { prefix, folderName: params.folderName });
+      const name = this.calculateFileName(file, { prefix });
       if (!name) return { file, name: null, body: null };
       const { Body } = await this.s3.send(
         new GetObjectCommand({ Bucket: this.bucket, Key: file.Key }),
@@ -308,20 +333,21 @@ class S3Zipper {
   }
 
   /**
-   * Zip a folder to a local file. Resolves after the file handle is closed.
+   * Zip a prefix to a local file. Resolves after the file handle is closed.
    */
   async zipToFile(params) {
-    if (!params?.zipFileName) {
-      throw new TypeError('S3Zipper.zipToFile: "zipFileName" is required');
+    params = normalizeParams(params);
+    if (!params?.filePath) {
+      throw new TypeError('S3Zipper.zipToFile: "filePath" is required');
     }
-    const fileStream = fs.createWriteStream(params.zipFileName);
+    const fileStream = fs.createWriteStream(params.filePath);
     const closed = once(fileStream, 'close');
     closed.catch(() => {});
 
     try {
       const result = await this.streamZipDataTo({ ...this._listParams(params), pipe: fileStream });
       await closed;
-      return { ...result, zipFileName: params.zipFileName };
+      return { ...result, filePath: params.filePath };
     } catch (err) {
       fileStream.destroy();
       throw err;
@@ -329,7 +355,7 @@ class S3Zipper {
   }
 
   /**
-   * Zip a folder into multiple local zip files, split by maxFileCount and/or
+   * Zip a prefix into multiple local zip files, split by maxFileCount and/or
    * maxFileSize. Fragments are numbered from 1 with `_<n>` appended before the
    * extension (`out_1.zip`, `out_2.zip`, ...). Empty fragments are discarded
    * and do not consume a number.
@@ -339,29 +365,31 @@ class S3Zipper {
    * @returns {Promise<object[]>} one result per non-empty fragment.
    */
   async zipToFileFragments(params) {
-    if (!params?.zipFileName) {
-      throw new TypeError('S3Zipper.zipToFileFragments: "zipFileName" is required');
+    params = normalizeParams(params);
+    if (!params?.filePath) {
+      throw new TypeError('S3Zipper.zipToFileFragments: "filePath" is required');
     }
     this._warnLowMaxFileSize(params);
-    const baseName = ensureZipExtension(params.zipFileName);
+    const baseName = ensureZipExtension(params.filePath);
 
     return this._fragmentLoop(params, async (startKey, number) => {
-      const zipFileName = fragmentName(baseName, number);
-      const result = await this.zipToFile({ ...params, startKey, zipFileName });
-      if (result.zippedFiles.length === 0) await fs.promises.rm(zipFileName, { force: true });
+      const filePath = fragmentName(baseName, number);
+      const result = await this.zipToFile({ ...params, startKey, filePath });
+      if (result.zippedFiles.length === 0) await fs.promises.rm(filePath, { force: true });
       return result;
     });
   }
 
   /**
-   * Zip a folder and upload the zip to S3 as a multipart upload, streaming
-   * straight from the archiver with no temporary file. When s3ZipFileName has
-   * no path it is placed inside s3FolderName. If the folder yields no entries
+   * Zip a prefix and upload the zip to S3 as a multipart upload, streaming
+   * straight from the archiver with no temporary file. When `key` has no
+   * path it is placed inside `prefix`. If the prefix yields no entries
    * nothing is uploaded.
    */
   async zipToS3File(params) {
-    if (!params?.s3ZipFileName) {
-      throw new TypeError('S3Zipper.zipToS3File: "s3ZipFileName" is required');
+    params = normalizeParams(params);
+    if (!params?.key) {
+      throw new TypeError('S3Zipper.zipToS3File: "key" is required');
     }
     const s3Key = this._resolveS3ZipKey(params);
 
@@ -380,9 +408,9 @@ class S3Zipper {
     if (!uploadDone) {
       this.logger.info('no files zipped, nothing to upload', { key: s3Key });
       return {
-        zipFileETag: null,
-        zipFileLocation: null,
-        zipFileKey: null,
+        key: null,
+        etag: null,
+        location: null,
         zippedFiles: [],
         totalFilesScanned: result.totalFilesScanned,
         lastScannedFile: result.lastScannedFile,
@@ -392,9 +420,9 @@ class S3Zipper {
     const upload = await uploadDone;
     this.logger.info('upload completed', { key: s3Key });
     return {
-      zipFileETag: upload.ETag ?? null,
-      zipFileLocation: upload.Location ?? null,
-      zipFileKey: s3Key,
+      key: s3Key,
+      etag: upload.ETag ?? null,
+      location: upload.Location ?? null,
       zippedFiles: result.zippedFiles,
       totalFilesScanned: result.totalFilesScanned,
       lastScannedFile: result.lastScannedFile,
@@ -402,20 +430,21 @@ class S3Zipper {
   }
 
   /**
-   * Zip a folder into fragments and upload each one to S3, streaming.
+   * Zip a prefix into fragments and upload each one to S3, streaming.
    * Uploaded keys are numbered from 1 with `_<n>` appended before the extension.
    *
    * @returns {Promise<object[]>} one result per uploaded fragment.
    */
   async zipToS3FileFragments(params) {
-    if (!params?.s3ZipFileName) {
-      throw new TypeError('S3Zipper.zipToS3FileFragments: "s3ZipFileName" is required');
+    params = normalizeParams(params);
+    if (!params?.key) {
+      throw new TypeError('S3Zipper.zipToS3FileFragments: "key" is required');
     }
     this._warnLowMaxFileSize(params);
     const baseKey = ensureZipExtension(this._resolveS3ZipKey(params));
 
     return this._fragmentLoop(params, (startKey, number) =>
-      this.zipToS3File({ ...params, startKey, s3ZipFileName: fragmentName(baseKey, number) }),
+      this.zipToS3File({ ...params, startKey, key: fragmentName(baseKey, number) }),
     );
   }
 
@@ -506,7 +535,7 @@ class S3Zipper {
 
   _listParams(params) {
     return {
-      folderName: params.s3FolderName,
+      prefix: params.prefix,
       startKey: params.startKey,
       maxFileCount: params.maxFileCount,
       maxFileSize: params.maxFileSize,
@@ -522,10 +551,9 @@ class S3Zipper {
     }
   }
 
+  /** A key without a "/" is placed inside the zipped prefix. */
   _resolveS3ZipKey(params) {
-    return params.s3ZipFileName.includes('/')
-      ? params.s3ZipFileName
-      : `${toPrefix(params.s3FolderName)}${params.s3ZipFileName}`;
+    return params.key.includes('/') ? params.key : `${toPrefix(params.prefix)}${params.key}`;
   }
 }
 
