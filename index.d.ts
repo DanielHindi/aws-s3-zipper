@@ -23,6 +23,8 @@ export interface S3ZipperOptions {
   clientConfig?: S3ClientConfig;
   s3Client?: S3Client;
   concurrency?: number;
+  /** Objects per ListObjectsV2 page (1-1000). */
+  pageSize?: number;
   tmpDir?: string;
   logger?: Logger;
 }
@@ -40,10 +42,13 @@ export interface ListParams {
   recursive?: boolean;
 }
 
-export interface GetFilesResult {
-  files: S3File[];
+export interface ScanStats {
   totalFilesScanned: number;
   lastScannedFile?: S3File;
+}
+
+export interface GetFilesResult extends ScanStats {
+  files: S3File[];
 }
 
 export interface StreamParams extends ListParams {
@@ -110,6 +115,7 @@ declare class S3Zipper {
   bucket: string;
   logger: Logger;
   concurrency: number;
+  pageSize: number;
   tmpDir: string;
   s3: S3Client;
 
@@ -118,6 +124,8 @@ declare class S3Zipper {
   /** Override to control the entry name inside the zip. */
   calculateFileName(file: S3File, context: { prefix: string; folderName: string }): string;
 
+  /** Lazily yields objects that pass filterOutFiles; `stats` is updated as the scan proceeds. */
+  scanFiles(params: ListParams, stats?: ScanStats): AsyncGenerator<S3File, void, undefined>;
   getFiles(params: ListParams): Promise<GetFilesResult>;
   streamZipDataTo(params: StreamParams): Promise<StreamResult>;
   zipToFile(params: ZipToFileParams): Promise<ZipToFileResult>;

@@ -75,6 +75,7 @@ class S3Zipper {
    * @param {object} [options.clientConfig]    Extra S3Client config, merged in.
    * @param {S3Client} [options.s3Client]      Bring your own client (also used for testing).
    * @param {number} [options.concurrency=10]  Parallel GetObject requests while zipping.
+   * @param {number} [options.pageSize=1000]   Objects per ListObjectsV2 page (max 1000).
    * @param {string} [options.tmpDir]          Where temp zips are written. Defaults to os.tmpdir().
    * @param {object} [options.logger]          Object with debug/info/warn/error. Silent by default.
    */
@@ -89,6 +90,7 @@ class S3Zipper {
     this.bucket = options.bucket;
     this.logger = options.logger || noopLogger;
     this.concurrency = Math.max(1, options.concurrency ?? 10);
+    this.pageSize = Math.min(1000, Math.max(1, options.pageSize ?? 1000));
     this.tmpDir = options.tmpDir || os.tmpdir();
     this.s3 = options.s3Client || new S3Client(buildClientConfig(options));
   }
@@ -111,59 +113,71 @@ class S3Zipper {
   }
 
   /**
-   * List objects under a folder, applying filterOutFiles and the
-   * maxFileCount / maxFileSize batching rules.
+   * Lazily scan objects under a folder, page by page, applying
+   * filterOutFiles and the maxFileCount / maxFileSize batching rules.
+   * Yields only objects that passed the filter. `stats` is updated as the
+   * scan progresses so the consumer can report totalFilesScanned and
+   * lastScannedFile without the generator having to buffer anything.
    *
-   * @returns {Promise<{files: object[], totalFilesScanned: number, lastScannedFile: object|undefined}>}
+   * @param {object} params
+   * @param {{totalFilesScanned: number, lastScannedFile?: object}} stats
    */
-  async getFiles(params = {}) {
+  async *scanFiles(params = {}, stats = { totalFilesScanned: 0, lastScannedFile: undefined }) {
     const { startKey, maxFileCount, maxFileSize, recursive = false } = params;
     const prefix = toPrefix(params.folderName);
 
     const input = { Bucket: this.bucket, Prefix: prefix };
     if (startKey) input.StartAfter = startKey;
     if (!recursive) input.Delimiter = '/';
-    if (maxFileCount > 0) input.MaxKeys = Math.min(maxFileCount, 1000);
+    const pageSize = maxFileCount > 0 ? Math.min(maxFileCount, this.pageSize) : this.pageSize;
+    if (pageSize < 1000) input.MaxKeys = pageSize;
 
-    const scanned = [];
-    const paginator = paginateListObjectsV2({ client: this.s3 }, input);
-
-    for await (const page of paginator) {
-      for (const obj of page.Contents || []) {
-        scanned.push(obj);
-        if (maxFileCount > 0 && scanned.length >= maxFileCount) break;
-      }
-      if (maxFileCount > 0 && scanned.length >= maxFileCount) break;
-    }
-
-    const files = [];
+    let passedCount = 0;
     let totalSize = 0;
-    let lastScannedFile;
 
-    for (const file of scanned) {
-      const passed = this.filterOutFiles(file);
-      if (passed) {
-        if (maxFileSize && passed.Size > maxFileSize) {
-          this.logger.warn('Single file exceeds maxFileSize', { key: passed.Key, size: passed.Size, maxFileSize });
-          if (files.length === 0) {
+    for await (const page of paginateListObjectsV2({ client: this.s3 }, input)) {
+      for (const file of page.Contents || []) {
+        if (maxFileCount > 0 && stats.totalFilesScanned >= maxFileCount) return;
+        stats.totalFilesScanned += 1;
+
+        const passed = this.filterOutFiles(file);
+        if (passed) {
+          if (maxFileSize && passed.Size > maxFileSize) {
+            this.logger.warn('Single file exceeds maxFileSize', { key: passed.Key, size: passed.Size, maxFileSize });
+            if (passedCount > 0) {
+              // Leave the oversized object for the next batch, where it is zipped alone.
+              stats.totalFilesScanned -= 1;
+              return;
+            }
             this.logger.warn('Zipping oversized file on its own', { key: passed.Key });
-            files.push(passed);
-            totalSize += passed.Size;
-          } else {
-            break;
+          } else if (maxFileSize && totalSize + passed.Size > maxFileSize) {
+            this.logger.debug('Hit maxFileSize, splitting fragment', { totalSize, maxFileSize });
+            stats.totalFilesScanned -= 1;
+            return;
           }
-        } else if (maxFileSize && totalSize + passed.Size > maxFileSize) {
-          this.logger.debug('Hit maxFileSize, splitting fragment', { totalSize, maxFileSize });
-          break;
-        } else {
-          files.push(passed);
+          passedCount += 1;
           totalSize += passed.Size;
+          stats.lastScannedFile = file;
+          yield passed;
+        } else {
+          stats.lastScannedFile = file;
         }
       }
-      lastScannedFile = file;
     }
+  }
 
-    return { files, totalFilesScanned: scanned.length, lastScannedFile };
+  /**
+   * List objects under a folder, applying filterOutFiles and the
+   * maxFileCount / maxFileSize batching rules. Convenience wrapper around
+   * scanFiles that collects the batch into an array.
+   *
+   * @returns {Promise<{files: object[], totalFilesScanned: number, lastScannedFile: object|undefined}>}
+   */
+  async getFiles(params = {}) {
+    const stats = { totalFilesScanned: 0, lastScannedFile: undefined };
+    const files = [];
+    for await (const file of this.scanFiles(params, stats)) files.push(file);
+    return { files, ...stats };
   }
 
   /**
@@ -178,7 +192,7 @@ class S3Zipper {
     }
 
     const prefix = toPrefix(params.folderName);
-    const listing = await this.getFiles(params);
+    const stats = { totalFilesScanned: 0, lastScannedFile: undefined };
 
     const archive = archiver('zip', params.archiverOptions);
     const failure = new Promise((_, reject) => archive.once('error', reject));
@@ -195,28 +209,35 @@ class S3Zipper {
 
     const zippedFiles = [];
 
+    const fetchEntry = async (file) => {
+      if (file.Key.endsWith('/')) return { file, name: null, body: null }; // folder placeholder
+      const name = this.calculateFileName(file, { prefix, folderName: params.folderName });
+      if (!name) return { file, name: null, body: null };
+      const { Body } = await this.s3.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: file.Key }),
+      );
+      return { file, name, body: Body };
+    };
+
+    const appendBatch = async (batch) => {
+      for (const { file, name, body } of await Promise.all(batch)) {
+        if (!name) continue;
+        this.logger.debug('zipping', { key: file.Key, name });
+        archive.append(body, { name, date: file.LastModified });
+        zippedFiles.push(file);
+      }
+    };
+
     const work = (async () => {
-      const files = listing.files;
-      for (let i = 0; i < files.length; i += this.concurrency) {
-        const batch = files.slice(i, i + this.concurrency);
-        const bodies = await Promise.all(
-          batch.map(async (file) => {
-            if (file.Key.endsWith('/')) return { file, name: null, body: null }; // folder placeholder
-            const name = this.calculateFileName(file, { prefix, folderName: params.folderName });
-            if (!name) return { file, name: null, body: null };
-            const { Body } = await this.s3.send(
-              new GetObjectCommand({ Bucket: this.bucket, Key: file.Key }),
-            );
-            return { file, name, body: Body };
-          }),
-        );
-        for (const { file, name, body } of bodies) {
-          if (!name) continue;
-          this.logger.debug('zipping', { key: file.Key, name });
-          archive.append(body, { name, date: file.LastModified });
-          zippedFiles.push(file);
+      let batch = [];
+      for await (const file of this.scanFiles(params, stats)) {
+        batch.push(fetchEntry(file));
+        if (batch.length >= this.concurrency) {
+          await appendBatch(batch);
+          batch = [];
         }
       }
+      await appendBatch(batch);
       await archive.finalize();
     })();
 
@@ -227,8 +248,8 @@ class S3Zipper {
     return {
       zip,
       zippedFiles,
-      totalFilesScanned: listing.totalFilesScanned,
-      lastScannedFile: listing.lastScannedFile,
+      totalFilesScanned: stats.totalFilesScanned,
+      lastScannedFile: stats.lastScannedFile,
     };
   }
 

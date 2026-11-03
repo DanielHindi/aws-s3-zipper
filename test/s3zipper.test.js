@@ -118,6 +118,32 @@ test('getFiles', async (t) => {
     assert.deepEqual(second.files.map((f) => f.Key), ['f/small.bin']);
   });
 
+  await t.test('does not request further pages once a batch is cut off', async () => {
+    const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`f/${String(i).padStart(2, '0')}`, 'xxxx']));
+    const { zipper, mock } = makeZipper(many);
+    const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
+    // Force small pages so the scan has to paginate.
+    const original = mock.commandCalls(ListObjectsV2Command);
+    assert.equal(original.length, 0);
+    zipper.pageSize = 5;
+    const result = await zipper.getFiles({ folderName: 'f', maxFileSize: 10 });
+    assert.deepEqual(result.files.map((f) => f.Key), ['f/00', 'f/01']);
+    assert.equal(mock.commandCalls(ListObjectsV2Command).length, 1);
+  });
+
+  await t.test('scanFiles yields lazily and updates stats', async () => {
+    const { zipper } = makeZipper();
+    const stats = { totalFilesScanned: 0, lastScannedFile: undefined };
+    const seen = [];
+    for await (const f of zipper.scanFiles({ folderName: 'photos', recursive: true }, stats)) {
+      seen.push(f.Key);
+      if (seen.length === 2) break;
+    }
+    assert.deepEqual(seen, ['photos/', 'photos/a.txt']);
+    assert.equal(stats.totalFilesScanned, 2);
+    assert.equal(stats.lastScannedFile.Key, 'photos/a.txt');
+  });
+
   await t.test('stops a batch before an oversized non-first file', async () => {
     const { zipper } = makeZipper({ 'f/a.bin': 'a', 'f/big.bin': 'x'.repeat(100) });
     const result = await zipper.getFiles({ folderName: 'f', maxFileSize: 10 });

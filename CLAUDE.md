@@ -20,11 +20,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Everything is the `S3Zipper` class in `index.js`. Methods form a layered call chain:
 
 ```
-getFiles                 paginateListObjectsV2 (StartAfter=startKey, Delimiter='/' unless recursive),
-   |                     applies filterOutFiles, enforces maxFileCount / maxFileSize cut-offs
+scanFiles (generator)    paginateListObjectsV2 (StartAfter=startKey, Delimiter='/' unless recursive),
+   |                     applies filterOutFiles, enforces maxFileCount / maxFileSize cut-offs,
+   |                     yields lazily and mutates a `stats` object; getFiles() just collects it
    v
-streamZipDataTo          GetObject in batches of `concurrency`, archive.append(stream) in order,
-   |                     pipes to params.pipe, awaits archive.finalize()
+streamZipDataTo          consumes scanFiles, GetObject in batches of `concurrency`,
+   |                     archive.append(stream) in order, pipes to params.pipe, awaits finalize()
    v
 zipToFile                wraps streamZipDataTo with an fs write stream, awaits 'close'
    |
@@ -40,7 +41,7 @@ zipToFile                wraps streamZipDataTo with an fs write stream, awaits '
 Invariants that are easy to break:
 
 - **Differential zipping** relies on `startKey` → `StartAfter` and on every result carrying `lastScannedFile` and `zippedFiles[].Key` so callers can resume.
-- **Fragment rules** in `getFiles`: an object larger than `maxFileSize` is zipped alone only when it is first in the batch; otherwise the batch ends before it. `totalFilesScanned` must include filtered-out objects, since the fragment loop stops only when it is 0.
+- **Fragment rules** in `scanFiles`: an object larger than `maxFileSize` is zipped alone only when it is first in the batch; otherwise the batch ends before it. `totalFilesScanned` must include filtered-out objects, since the fragment loop stops only when it is 0.
 - **Folder placeholders** (keys ending in `/`) are scanned and counted but never appended. A fragment containing only a placeholder is empty, gets deleted, and does not consume a fragment number.
 - **`filterOutFiles(file)` and `calculateFileName(file, { prefix, folderName })`** are public override points documented in the README. Keep their signatures.
 - **Prefix handling** goes through `toPrefix()`: `''` means the bucket root, leading/trailing slashes are stripped.
