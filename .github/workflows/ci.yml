@@ -21,3 +21,32 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+
+  integration-minio:
+    runs-on: ubuntu-latest
+    services:
+      minio:
+        image: bitnami/minio:latest
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration
+        env:
+          S3ZIPPER_TEST_ENDPOINT: http://127.0.0.1:9000
+          S3ZIPPER_TEST_ACCESS_KEY: minioadmin
+          S3ZIPPER_TEST_SECRET_KEY: minioadmin
+          S3ZIPPER_TEST_BUCKET: aws-s3-zipper-ci

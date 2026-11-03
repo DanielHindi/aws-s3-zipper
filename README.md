@@ -214,6 +214,15 @@ Version 2 is a rewrite. Breaking changes:
 - `calculateFileName(file, { prefix })` receives a context argument. The default implementation strips the prefix (same result as before for non-root folders).
 - `init()` was removed. Construct a new instance instead.
 
+## Development
+
+```bash
+npm install
+npm test              # build + unit tests (mocked S3) + packaging + integration (in-process server)
+npm run test:integration   # integration only; set S3ZIPPER_TEST_ENDPOINT to target MinIO/S3
+npm run lint && npm run typecheck
+```
+
 ## License
 
 MIT

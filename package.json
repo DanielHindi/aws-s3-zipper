@@ -34,7 +34,8 @@
     "test:watch": "node --test --watch test/",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test:integration": "npm run build && node --test test/integration.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1161.0",

@@ -18,7 +18,7 @@ Full rewrite on AWS SDK v3 with a Promise-based API. See the README's "Migrating
 - `signal` (AbortSignal) param on every method; cancels listing, fetches, archiving and uploads.
 - `onFragment` hook for fragment methods.
 - Source is TypeScript; the package ships ESM (`dist/index.mjs`) and CommonJS (`dist/index.cjs`) builds with generated declarations. Closes #37, #49.
-- Test suite (`node --test` with mocked S3), ESLint (incl. typescript-eslint), GitHub Actions CI.
+- Test suite (`node --test` with mocked S3), an HTTP integration suite (MinIO in CI, in-process S3-compatible server locally), ESLint (incl. typescript-eslint), GitHub Actions CI.
 
 ### Changed
 - One flat set of parameter names everywhere: `prefix`, `filePath`, `key`. The 1.x names (`folderName`, `s3FolderName`, `zipFileName`, `s3ZipFileName`) are accepted as aliases. S3 results use `key`, `etag`, `location`.

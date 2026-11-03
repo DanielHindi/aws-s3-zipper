@@ -15,6 +15,7 @@ Built with `tsup` into `dist/` as ESM (`index.mjs`), CJS (`index.cjs`) and decla
 - Test: `npm test` (Node's built-in `node --test`, no network; S3 is mocked with `aws-sdk-client-mock`)
 - Single test file (after a build): `node --test test/s3zipper.test.js`
 - Single test by name: `node --test --test-name-pattern="maxFileSize" test/`
+- Integration only: `npm run test:integration`. Runs over real HTTP. With `S3ZIPPER_TEST_ENDPOINT` (+ `_ACCESS_KEY`, `_SECRET_KEY`, optional `_BUCKET`, `_REGION`) it targets MinIO/S3; without it, `test/fake-s3-server.js` is started in-process. CI runs it against a MinIO service container.
 - Type-check: `npm run typecheck`
 - Lint: `npm run lint` (ESLint flat config in `eslint.config.js`, JS + TS)
 - CI runs lint, typecheck and tests on Node 20/22/24 (`.github/workflows/ci.yml`).
@@ -60,7 +61,10 @@ Invariants that are easy to break:
 
 ## Tests
 
-`test/helpers.js` provides `fakeBucket()` (mocked `S3Client` backed by a `{ key: contents }` object, with a `uploads` array capturing `PutObject` bodies), `collector()` (a Writable that buffers), and `readZip()` (yauzl-based zip reader). Add tests against those rather than hitting S3.
+- `test/s3zipper.test.js`: unit tests on a mocked `S3Client`. `test/helpers.js` provides `fakeBucket()` (mock backed by a `{ key: contents }` object, with an `uploads` array capturing `PutObject` bodies), `collector()` (a buffering Writable) and `readZip()` (yauzl, text entries).
+- `test/integration.test.js`: the same flows over real HTTP, including a 6 MB object to force a multipart upload. Uses a unique `it-<run>/` prefix and cleans up after itself, so it is safe against a shared bucket.
+- `test/fake-s3-server.js`: minimal S3 REST server (ListObjectsV2 with delimiter/pagination, Get/Put, multipart, aws-chunked decoding). Extend it rather than mocking when a new SDK call is added.
+- `test/packaging.test.js`: guards the CJS/ESM entry-point contract.
 
 ## README
 
