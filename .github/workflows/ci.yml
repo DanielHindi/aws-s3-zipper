@@ -23,7 +23,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-  integration-minio:
+  integration-s3:
+    # Runs the HTTP integration suite against a real S3-compatible server.
+    # MinIO no longer publishes images to Docker Hub, so this uses RustFS.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -31,23 +33,26 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Start MinIO
+      - name: Start RustFS
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
+          docker run -d --name rustfs -p 9000:9000 \
+            -e RUSTFS_ADDRESS=0.0.0.0:9000 \
+            -e RUSTFS_VOLUMES=/data \
+            -e RUSTFS_ACCESS_KEY=ciadmin \
+            -e RUSTFS_SECRET_KEY=ciadmin-secret \
+            rustfs/rustfs:1.0.4
           for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:9000/minio/health/live && break
+            curl -sf http://127.0.0.1:9000/health && break
             sleep 2
           done
-          curl -sf http://127.0.0.1:9000/minio/health/live
+          curl -sf http://127.0.0.1:9000/health
       - run: npm ci
       - run: npm run test:integration
         env:
           S3ZIPPER_TEST_ENDPOINT: http://127.0.0.1:9000
-          S3ZIPPER_TEST_ACCESS_KEY: minioadmin
-          S3ZIPPER_TEST_SECRET_KEY: minioadmin
+          S3ZIPPER_TEST_ACCESS_KEY: ciadmin
+          S3ZIPPER_TEST_SECRET_KEY: ciadmin-secret
           S3ZIPPER_TEST_BUCKET: aws-s3-zipper-ci
-      - name: MinIO logs
+      - name: RustFS logs
         if: failure()
-        run: docker logs minio
+        run: docker logs rustfs || true

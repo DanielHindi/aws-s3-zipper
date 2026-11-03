@@ -15,7 +15,7 @@ Built with `tsup` into `dist/` as ESM (`index.mjs`), CJS (`index.cjs`) and decla
 - Test: `npm test` (Node's built-in `node --test` over `test/*.test.js`; the shell glob matters, a bare directory argument only works on Node 26+)
 - Single test file (after a build): `node --test test/s3zipper.test.js`
 - Single test by name: `node --test --test-name-pattern="maxFileSize" test/`
-- Integration only: `npm run test:integration`. Runs over real HTTP. With `S3ZIPPER_TEST_ENDPOINT` (+ `_ACCESS_KEY`, `_SECRET_KEY`, optional `_BUCKET`, `_REGION`) it targets MinIO/S3; without it, `test/fake-s3-server.js` is started in-process. CI runs it against a MinIO service container.
+- Integration only: `npm run test:integration`. Runs over real HTTP. With `S3ZIPPER_TEST_ENDPOINT` (+ `_ACCESS_KEY`, `_SECRET_KEY`, optional `_BUCKET`, `_REGION`) it targets MinIO/S3; without it, `test/fake-s3-server.js` is started in-process. CI runs it against a RustFS container (MinIO no longer publishes Docker images).
 - Type-check: `npm run typecheck`
 - Lint: `npm run lint` (ESLint flat config in `eslint.config.js`, JS + TS)
 - CI runs lint, typecheck and tests on Node 20/22/24 (`.github/workflows/ci.yml`).
