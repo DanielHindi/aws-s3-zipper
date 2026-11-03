@@ -1,256 +1,205 @@
 # Amazon S3 Zipping tool (aws-s3-zipper)
 
+Zip the contents of an S3 "folder" to a stream, a local file, local file fragments, an S3 object, or S3 object fragments. Built on AWS SDK v3 and [archiver](https://www.npmjs.com/package/archiver). Objects are streamed from S3 straight into the zip, so memory use stays flat regardless of file size.
+
+Requires Node.js 20 or newer. Upgrading from 1.x? See [Migrating from 1.x](#migrating-from-1x).
+
 ## What does it do?
-### 1. Zips S3 files
-Takes an amazon s3 bucket folder and zips it to a:
-* Stream
-* Local File
-* Local File Fragments (zip multiple files broken up by max number of files or size)
-* S3 File (ie uploads the zip back to s3)
-* S3 File Fragments (upload multiple zip files broken up by max number of files or size)
 
-### 2. Differential zipping
-It also allows you to do *differential* zips. You can save the key of the last file you zipped and then zip files that have been uploaded after the last zip.
+1. **Zips S3 files** to a stream, a local file, local file fragments, an S3 file, or S3 file fragments.
+2. **Differential zipping**: save the key of the last file you zipped and only zip files added after it.
+3. **Fragmented zips**: cap each zip by file count or total (pre-compression) byte size.
+4. **Filtering**: skip objects based on any criteria.
 
-### 3. Fragmented Zips
-If a zip file has the potential of getting too big. You can provide limits to breakup the compression into multiple zip files. You can limit based on file count or total size (pre zip)
+## Install
 
-### 4. Filter Files to zip
-You can filter out files you dont want zipped based on any criteria you need
-
-
-
-## How do i use it?
-### Setup
-```
-var S3Zipper = require ('aws-s3-zipper');
-
-var config ={
-    accessKeyId: "XXXX",
-    secretAccessKey: "XXXX",
-    region: "us-west-2",
-    bucket: 'XXX'
-};
-var zipper = new S3Zipper(config);
+```bash
+npm install aws-s3-zipper
 ```
 
+## Setup
 
-### Filter out Files
-```
-zipper.filterOutFiles= function(file){
-    if(file.Key.indexOf('.tmp') >= 0) // filter out temp files
-        return null;
-    else 
-      return file;
-};
-```
+```js
+const S3Zipper = require('aws-s3-zipper');
 
-### Zip to local file
-```
-zipper.zipToFile ({
-        s3FolderName: 'myBucketFolderName'
-        , startKey: 'keyOfLastFileIZipped' // could keep null
-        , zipFileName: './myLocalFile.zip'
-        , recursive: true
-    }
-    ,function(err,result){
-        if(err)
-            console.error(err);
-        else{
-            var lastFile = result.zippedFiles[result.zippedFiles.length-1];
-            if(lastFile)
-                console.log('last key ', lastFile.Key); // next time start from here
-        }
+const zipper = new S3Zipper({
+  bucket: 'my-bucket',
+  region: 'us-west-2',
 });
 ```
 
-### Pipe zip data to stream (using Express.js)
-```
-app.all('/', function (request, response) {
-    response.set('content-type', 'application/zip') // optional
-    zipper.streamZipDataTo({
-        pipe: response
-        , folderName: 'myBucketFolderName'
-        , startKey: 'keyOfLastFileIZipped' // could keep null
-        , recursive: true
-        }
-        ,function (err, result) {
-            if(err)
-                console.error(err);
-            else{
-                console.log(result)
-            }
-        })
-})
+Credentials are optional. When omitted the AWS SDK default credential chain is used (environment variables, `~/.aws/credentials`, IAM roles on EC2/ECS/Lambda, SSO, etc.). All options:
+
+| Option | Description |
+| --- | --- |
+| `bucket` | **Required.** Bucket name. |
+| `region` | AWS region. Falls back to the SDK's region resolution. |
+| `accessKeyId`, `secretAccessKey` | Static credentials. Must be given together. |
+| `sessionToken` | For temporary credentials. |
+| `endpoint` | Custom endpoint for S3-compatible services (MinIO, DigitalOcean Spaces, ...). |
+| `forcePathStyle` | Use path-style URLs. Usually needed with a custom endpoint. |
+| `clientConfig` | Any extra `S3ClientConfig` merged into the client. |
+| `s3Client` | Bring your own `S3Client` instance (the options above are then ignored). |
+| `concurrency` | Parallel `GetObject` requests while zipping. Default `10`. |
+| `tmpDir` | Where temporary zips are written for the S3 upload methods. Default `os.tmpdir()`. |
+| `logger` | Object with `debug`, `info`, `warn`, `error`. Silent by default. Pass `console` to see progress. |
+
+### Filter out files
+
+```js
+zipper.filterOutFiles = (file) => (file.Key.endsWith('.tmp') ? null : file);
 ```
 
-### Zip fragments to local file system with the filename pattern with a maximum file count
-```
-zipper.zipToFileFragments ({
-        s3FolderName:'myBucketFolderName'
-        ,startKey: null
-        ,zipFileName './myLocalFile.zip'
-        ,maxFileCount: 5
-        ,maxFileSize: 1024*1024
-    }, function(err,results){
-        if(err)
-               console.error(err);
-           else{
-               if(results.length > 0) {
-                   var result = results[results.length - 1];
-                   var lastFile = result.zippedFiles[result.zippedFiles.length - 1];
-                   if (lastFile)
-                       console.log('last key ', lastFile.Key); // next time start from here
-               }
-           }
-   });
+### Control entry names
+
+By default entries are named relative to the zipped folder (`photos/2024/a.jpg` → `2024/a.jpg`). Override to flatten or rename:
+
+```js
+const path = require('node:path');
+zipper.calculateFileName = (file) => path.basename(file.Key);
 ```
 
+## Usage
 
-### Zip to S3 file
+Every method returns a Promise.
+
+### Zip to a local file
+
+```js
+const result = await zipper.zipToFile({
+  s3FolderName: 'photos',
+  zipFileName: './photos.zip',
+  startKey: lastKeyFromPreviousRun, // optional
+  recursive: true,
+});
+
+const last = result.zippedFiles.at(-1);
+if (last) console.log('next time start after', last.Key);
 ```
-/// if no path is given to S3 zip file then it will be placed in the same folder
-zipper.zipToS3File ({
-        s3FolderName: 'myBucketFolderName'
-        , startKey: 'keyOfLastFileIZipped' // optional
-        , s3ZipFileName: 'myS3File.zip'
-        , tmpDir: "/tmp" // optional, defaults to node_modules/aws-s3-zipper
-    },function(err,result){
-        if(err)
-            console.error(err);
-        else{
-            var lastFile = result.zippedFiles[result.zippedFiles.length-1];
-            if(lastFile)
-                console.log('last key ', lastFile.Key); // next time start from here
-        }
+
+### Pipe a zip to a stream (Express example)
+
+```js
+app.get('/download', async (req, res, next) => {
+  res.set('Content-Type', 'application/zip');
+  res.set('Content-Disposition', 'attachment; filename="photos.zip"');
+  try {
+    await zipper.streamZipDataTo({ pipe: res, folderName: 'photos', recursive: true });
+  } catch (err) {
+    next(err);
+  }
 });
 ```
 
-### Zip fragments to S3
-```
-zipper.zipToS3FileFragments({
-    s3FolderName: 'myBucketFolderName'
-    , startKey: 'keyOfLastFileIZipped' // optional
-    , s3ZipFileName: 'myS3File.zip'
-    , maxFileCount: 5
-    , maxFileSize: 1024*1024
-    , tmpDir: "/tmp" // optional, defaults to node_modules/aws-s3-zipper
-    },function(err, results){
-    if(err)
-        console.error(err);
-    else    if(results.length > 0) {
-        var result = results[results.length - 1];
-        var lastFile = result.zippedFiles[result.zippedFiles.length - 1];
-        if (lastFile)
-            console.log('last key ', lastFile.Key); // next time start from here
-    }
+If the client disconnects the archive is aborted and no further objects are fetched.
 
+### Zip to local fragments
+
+```js
+const results = await zipper.zipToFileFragments({
+  s3FolderName: 'photos',
+  zipFileName: './photos.zip', // produces photos_1.zip, photos_2.zip, ...
+  maxFileCount: 500,
+  maxFileSize: 500 * 1024 * 1024,
+  recursive: true,
+  onFragment: (fragment, index) => console.log('wrote', fragment.zipFileName),
 });
 ```
 
-## The Details
-### `init`
-Either from the constructor or from the `init(config)` function you can pass along the AWS config object
-```
-{
-    accessKeyId: [Your access id],
-    secretAccessKey: [your access key],
-    region: [the region of your S3 bucket],
-    bucket: [your bucket name],
-    endpoint: [optional, for use with S3-compatible services]
-}
-```
-If using temporary credentials
-```
-{
-    accessKeyId: [Your access id],
-    secretAccessKey: [your access key],
-    sessionToken: [your session token],
-    region: [the region of your S3 bucket],
-    bucket: [your bucket name],
-    endpoint: [optional, for use with S3-compatible services]
-}
-```
-### `filterOutFiles(file)`
-Override this function when you want to filter out certain files. The `file` param that is passed to you is the format of the aws file
-* file
-```
-/// as of when this document was written
-{
-  Key: [file key], // this is what you use to keep track of where you left off
-  ETag: [file tag],
-  LastModified: [i'm sure you get it],
-  Owner: {},
-  Size: [in bytes],
-  StorageClass: [type of storage]
-}
+### Zip to an S3 object
+
+```js
+const result = await zipper.zipToS3File({
+  s3FolderName: 'photos',
+  s3ZipFileName: 'photos.zip', // no "/" → stored as photos/photos.zip
+  recursive: true,
+});
+console.log(result.zipFileKey, result.zipFileETag);
 ```
 
-### `getFiles: function(params,callback)`
-Get a list of files in the bucket folder
-* `params` object
-    * `folderName` : the name of the folder in the bucket
-    * `startKey`: optional. return files listed after this file key
-    * `recursive`: bool optional. to zip nested folders or not
-* `callback(err,result)`: the function you want called when the list returns
-  * `err`: error object if it exists
-  * `result`:
-        * `files`: array of files found
-        * `totalFilesScanned`: total number of files scanned including filter out files from the `filterOutFiles` function
+### Zip to S3 fragments
 
-### `streamZipDataTo: function (params, callback)`
-If you want to get a stream to pipe raw data to. For example if you wanted to stream the zip file directly to an http response
-* `params` object
-    * `pipe`: the pipe to which you want the stream to feed
-    * `folderName`: the name of the bucket folder you want to stream
-    * `startKey`: optional. start zipping after this file key
-    * `recursive`: bool optional. to zip nested folders or not
-* `callback(err,result)`: call this function when done
-  * `err`: the error object if any
-  * `result`: the resulting archiver zip object with attached property 'manifest' whcih is an array of files it zipped
+```js
+const results = await zipper.zipToS3FileFragments({
+  s3FolderName: 'photos',
+  s3ZipFileName: 'archives/photos.zip', // uploads archives/photos_1.zip, archives/photos_2.zip, ...
+  maxFileCount: 500,
+});
+```
 
-### `zipToS3File: function (params ,callback)`
-Zip files in an s3 folder and place the zip file back on s3
-* `params` object
-    * `s3FolderName`: the name of the bucket folder you want to stream
-    * `startKey`: optional. start zipping after this file key
-    * `s3FilerName`: the name of the new s3 zip file including its path. if no path is given it will defult to the same s3 folder
-    * `recursive`: bool optional. to zip nested folders or not
-* `callback(err,result)`: call this function when done
-  * `err`: the error object if any
-  * `result`: the resulting archiver zip object with attached property 'manifest' whcih is an array of files it zipped
+### Zip the bucket root
 
-### `zipToS3FileFragments: function (params , callback)`
-* `params` object
-    * `s3FolderName`: the name of the bucket folder you want to stream
-    * `startKey`: optional. start zipping after this file key
-    * `s3ZipFileName`: the pattern of the name of the S3 zip files to be uploaded. Fragments will have an underscore and index at the end of the file name example ["allImages_1.zip","allImages_2.zip","allImages_3.zip"]
-    * `maxFileCount`: Optional. maximum number of files to zip in a single fragment.
-    * `maxFileSize`: Optional. Maximum Bytes to fit into a single zip fragment. Note: If a file is found larger than the limit a separate fragment will becreated just for it.
-    * `recursive`: bool optional. to zip nested folders or not
-* `callback(err,result)`: call this function when done
-  * `err`: the error object if any
-  * `results`: the array of results
+Pass an empty string as the folder name:
 
-### `zipToFile: function (params ,callback)`
-Zip files to a local zip file. 
-* `params` object
-    * `s3FolderName`: the name of the bucket folder you want to stream
-    * `startKey`: optional. start zipping after this file key
-    * `zipFileName`: the name of the new local zip file including its path.
-    * `recursive`: bool optional. to zip nested folders or not
-* `callback(err,result)`: call this function when done
-  * `err`: the error object if any
-  * `result`: the resulting archiver zip object with attached property 'manifest' whcih is an array of files it zipped
+```js
+await zipper.zipToFile({ s3FolderName: '', zipFileName: './bucket.zip', recursive: true });
+```
 
-### `zipToFileFragments: function (params,callback)`
-* `params` object
-    * `s3FolderName`: the name of the bucket folder you want to stream
-    * `startKey`: optional. start zipping after this file key
-    * `zipFileName`: the pattern of the name of the zip files to be uploaded. Fragments will have an underscore and index at the end of the file name example ["allImages_1.zip","allImages_2.zip","allImages_3.zip"]
-    * `maxFileCount`: Optional. maximum number of files to zip in a single fragment.
-    * `maxFileSize`: Optional. Maximum Bytes to fit into a single zip fragment. Note: If a file is found larger than the limit a separate fragment will becreated just for it.
-    * `recursive`: bool optional. to zip nested folders or not
-* `callback(err,result)`: call this function when done
-  * `err`: the error object if any
-  * `results`: the array of results
+## API
+
+All list-style methods accept these common params:
+
+| Param | Description |
+| --- | --- |
+| `folderName` / `s3FolderName` | Folder inside the bucket. `''` for the root. |
+| `startKey` | Only include objects whose key sorts after this one. |
+| `maxFileCount` | Stop scanning after this many objects. |
+| `maxFileSize` | Max total bytes (pre-compression) per batch. An object larger than this is zipped alone if it is first in the batch, otherwise the batch ends before it. |
+| `recursive` | Include nested "folders". Default `false`. |
+| `archiverOptions` | Passed to `archiver('zip', options)` (e.g. `{ zlib: { level: 9 } }`). |
+
+### `getFiles(params)` → `{ files, totalFilesScanned, lastScannedFile }`
+
+Lists objects and applies `filterOutFiles` and the batching rules. `totalFilesScanned` counts filtered-out objects too; `lastScannedFile` is where the next batch should resume.
+
+### `streamZipDataTo(params)` → `{ zip, zippedFiles, totalFilesScanned, lastScannedFile }`
+
+Writes a zip into `params.pipe` (any Writable). Resolves once the archive has finished. `zip` is the archiver instance with a `manifest` property equal to `zippedFiles`.
+
+### `zipToFile(params)` → `{ ..., zipFileName }`
+
+As above, into a local file. Resolves after the file handle is closed.
+
+### `zipToFileFragments(params)` → `result[]`
+
+Repeats `zipToFile` from `lastScannedFile` until the folder is exhausted. Fragments are named `name_1.zip`, `name_2.zip`, ... Empty fragments are deleted and do not consume a number. `params.onFragment(result, index)` is awaited after each fragment.
+
+### `zipToS3File(params)` → `{ zipFileKey, zipFileETag, zipFileLocation, zippedFiles }`
+
+Zips to a temp file in `tmpDir` and uploads it with multipart upload. If `s3ZipFileName` has no `/` it is placed inside `s3FolderName`. Temp files are always removed.
+
+### `zipToS3FileFragments(params)` → `result[]`
+
+Fragments uploaded as `key_1.zip`, `key_2.zip`, ... Each result has `s3Key` and `uploadedFile`.
+
+### `uploadLocalFileToS3(localFileName, s3Key, { contentType })`
+
+Multipart upload helper used by the S3 methods.
+
+## TypeScript
+
+Type definitions ship with the package (`index.d.ts`).
+
+```ts
+import S3Zipper from 'aws-s3-zipper';
+```
+
+## Migrating from 1.x
+
+Version 2 is a rewrite. Breaking changes:
+
+- **Node 20+** is required.
+- **Promises instead of callbacks.** Every method returns a Promise; the trailing callback argument is gone.
+- **No positional arguments.** Pass a params object to every method.
+- **AWS SDK v3.** `aws-sdk` and `@auth0/s3` are no longer dependencies. `accessKeyId`/`secretAccessKey`/`region` are now optional. `s3ForcePathStyle` is accepted as an alias of `forcePathStyle`.
+- **Silent by default.** Pass `logger: console` to get the old progress output.
+- **Temp files** default to `os.tmpdir()` instead of the current working directory.
+- **Fragment naming** is consistent and 1-based for both local and S3 fragments (`name_1.zip`, `name_2.zip`, ...). Previously the first local fragment had no suffix and S3 fragments were 0-based.
+- `zipToFileFragments` no longer returns an `events` object; use `params.onFragment` instead.
+- Fragment methods reject on the first error instead of collecting errors.
+- `calculateFileName(file, { prefix, folderName })` receives a context argument. The default implementation strips the folder prefix (same result as before for non-root folders).
+- `init()` was removed. Construct a new instance instead.
+
+## License
+
+MIT
