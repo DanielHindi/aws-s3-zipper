@@ -21,7 +21,7 @@ npm install aws-s3-zipper
 ## Setup
 
 ```js
-const S3Zipper = require('aws-s3-zipper');
+import S3Zipper from 'aws-s3-zipper'; // or: const S3Zipper = require('aws-s3-zipper');
 
 const zipper = new S3Zipper({
   bucket: 'my-bucket',
@@ -187,12 +187,14 @@ Fragments streamed and uploaded as `key_1.zip`, `key_2.zip`, ... Each result has
 
 Multipart upload helper for an existing local file.
 
-## TypeScript
+## TypeScript, ESM and CommonJS
 
-Type definitions ship with the package (`index.d.ts`).
+The package is written in TypeScript and ships ESM and CommonJS builds with declarations.
 
 ```ts
-import S3Zipper from 'aws-s3-zipper';
+import S3Zipper from 'aws-s3-zipper';            // ESM / TypeScript
+import { S3Zipper } from 'aws-s3-zipper';        // named export works too
+const S3Zipper = require('aws-s3-zipper');       // CommonJS: the class itself
 ```
 
 ## Migrating from 1.x

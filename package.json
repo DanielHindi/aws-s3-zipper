@@ -2,11 +2,24 @@
   "name": "aws-s3-zipper",
   "version": "2.0.0",
   "description": "Zip files from and to an Amazon AWS S3 Bucket directory as a stream, file or fragments. Allows filtering files.",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
-    "index.js",
-    "index.d.ts",
+    "dist",
     "README.md",
     "CHANGELOG.md"
   ],
@@ -14,10 +27,14 @@
     "node": ">=20"
   },
   "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
     "test": "node --test test/",
     "test:watch": "node --test --watch test/",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1161.0",
@@ -26,9 +43,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/archiver": "^6.0.4",
+    "@types/node": "^26.6.6",
     "aws-sdk-client-mock": "^4.1.0",
     "eslint": "^10.14.0",
     "globals": "^17.14.0",
+    "tsup": "^9.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
     "yauzl": "^3.2.0"
   },
   "repository": {
